@@ -1,0 +1,9 @@
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+matplotlib>=3.7
+requests>=2.31
+Pillow>=10.0
+tqdm>=4.65        # optional - nur für Fortschrittsbalken; fällt sonst stumm zurück
+numba>=0.59       # JIT-Compiler für den MCMC-Kern (v2 Pflicht)
+plotly>=5.20      # Interaktive HTML-Plots (06_*.html, 07_*.html, 08_*.html)

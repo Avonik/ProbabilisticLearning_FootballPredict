@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\julia\\\\PythonProject\\\\RueUndSalvenson\" -Recurse -Force)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Sort-Object FullName)",
+      "Bash(/c/Users/julia/PythonProject/RueUndSalvenson/.venv/Scripts/python.exe *)",
+      "Bash(\"C:/Users/julia/PythonProject/RueUndSalvenson/.venv/Scripts/python.exe\" _smoke.py)",
+      "Bash(\"C:/Users/julia/PythonProject/RueUndSalvenson/.venv/Scripts/python.exe\" _diag.py)",
+      "Bash(grep -vE \"Lade|Gesamt|xG-|Numba|^\\\\s*$\")",
+      "Bash(.venv/Scripts/python.exe _seedtest.py)",
+      "Bash(../.venv/Scripts/python.exe _smoke.py)",
+      "Bash(../.venv/Scripts/python.exe _equiv.py)"
+    ]
+  }
+}
