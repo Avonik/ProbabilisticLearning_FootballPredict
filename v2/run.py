@@ -111,6 +111,15 @@ THIN         = 25          # 18 000 Samples pro Kette × 4 = 72 000 — reicht
 PROPOSAL_SD  = 0.06        # Paper ~55 % Akzeptanz; 0.06 → ~50 % (gut)
 SEED         = 42
 
+# === Informativer Prior aus Team-Marktwerten (optional) ===
+# Statt N(0, σ²) wird die Initial-Stärke jedes Teams auf κ·z(log Marktwert)
+# zentriert (z-standardisiert pro Liga). USE_MARKET_PRIOR=False ⇒ κ=0 ⇒ exakt
+# das bisherige Modell. Erwartet data_cache/market_values.csv mit den Spalten
+# Season, Team (football-data-Name), MarketValue (as-of Saisonstart).
+USE_MARKET_PRIOR   = True
+MARKET_PRIOR_KAPPA = 0.10
+MARKET_VALUE_CSV   = "data_cache/transfermarkt_squad_values.csv"
+
 OUT = Path("output")
 OUT.mkdir(exist_ok=True)
 
@@ -239,8 +248,17 @@ def main():
 
     # ─── Phase 6: Haupt-MCMC ─────────────────────────────────────────
     banner(f"PHASE 6: MCMC-Inferenz auf Saison {ANALYSIS_SEASON}")
+    market_values = None
+    if USE_MARKET_PRIOR:
+        from market_value import team_market_values
+        market_values = team_market_values(ANALYSIS_SEASON, csv_path=MARKET_VALUE_CSV)
+        print(f"  Marktwert-Prior aktiv (κ={MARKET_PRIOR_KAPPA}): "
+              f"{len(market_values)} Teams mit Wert geladen.")
+
     L = build_league(df_season, use_xg=USE_XG,
-                     tau=best_tau, gamma=best_gamma, epsilon=best_eps)
+                     tau=best_tau, gamma=best_gamma, epsilon=best_eps,
+                     team_values=market_values,
+                     market_kappa=MARKET_PRIOR_KAPPA if USE_MARKET_PRIOR else 0.0)
     print(f"  League: {L.n_teams} Teams, {L.n_matches} Spiele, "
           f"{int(L.team_start[-1])} Stärken-Knoten")
     print(f"  Beobachtung: {'gerundetes xG' if USE_XG else 'tatsächliche Tore'}")

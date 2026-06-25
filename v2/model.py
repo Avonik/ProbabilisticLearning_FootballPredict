@@ -91,6 +91,12 @@ class League:
     epsilon: float = DEFAULT_EPSILON
     phi: float = DEFAULT_PHI          # xG-Präzision (nur bei continuous_obs)
 
+    # --- Informativer Prior (optional) --------------------------------
+    init_prior_mean: np.ndarray | None = None   # shape (n_teams,): Prior-Mittel
+                                                # der Initial-Stärke je Team
+                                                # (κ·z(log Marktwert)). None/zeros
+                                                # ⇒ klassischer N(0,σ²)-Prior.
+
     # --- xG-Felder (optional) -----------------------------------------
     xg_home: np.ndarray | None = None
     xg_away: np.ndarray | None = None
@@ -113,7 +119,9 @@ def build_league(df: pd.DataFrame,
                  gamma: float = DEFAULT_GAMMA,
                  epsilon: float = DEFAULT_EPSILON,
                  continuous_xg: bool = False,
-                 phi: float = DEFAULT_PHI) -> League:
+                 phi: float = DEFAULT_PHI,
+                 team_values: dict | None = None,
+                 market_kappa: float = 0.0) -> League:
     """Baut die League-Struktur aus dem Spiele-DataFrame.
 
     Wenn ``use_xg=True`` und die Spalten ``xG_home`` / ``xG_away`` vorhanden
@@ -199,6 +207,24 @@ def build_league(df: pd.DataFrame,
         c_x = float(np.log(home_goals.mean()))
         c_y = float(np.log(away_goals.mean()))
 
+    # Informativer Prior aus Marktwerten (Option A):
+    # Prior-Mittel der Initial-Stärke je Team = market_kappa · z(log Marktwert),
+    # z-standardisiert über die Teams DIESER Liga (Σ≈0 → kompatibel mit der
+    # Sum-to-Zero-Projektion im MCMC-Kern). Fehlende/≤0-Werte ⇒ 0 (0-Prior).
+    # market_kappa=0 oder team_values=None ⇒ Nullvektor ⇒ bisheriges Verhalten.
+    init_prior_mean = np.zeros(n_teams, dtype=np.float64)
+    if team_values is not None and market_kappa != 0.0:
+        raw = np.array([team_values.get(t, np.nan) for t in teams],
+                       dtype=np.float64)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            logv = np.log(raw)
+        mask = np.isfinite(logv)
+        if int(mask.sum()) >= 2:
+            mu = float(logv[mask].mean())
+            sd = float(logv[mask].std())
+            if sd > 0.0:
+                init_prior_mean[mask] = market_kappa * (logv[mask] - mu) / sd
+
     return League(
         teams=teams,
         home_idx=home_idx, away_idx=away_idx,
@@ -214,6 +240,7 @@ def build_league(df: pd.DataFrame,
         match_home_local=match_home_local,
         match_away_local=match_away_local,
         tau=tau, gamma=gamma, epsilon=epsilon, phi=phi,
+        init_prior_mean=init_prior_mean,
         xg_home=xg_home, xg_away=xg_away, use_xg=use_xg,
         continuous_obs=continuous_obs,
     )

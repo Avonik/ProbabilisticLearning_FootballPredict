@@ -11,6 +11,8 @@ import pickle
 import sys
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")  # headless: nur Datei-Export, kein GUI-Fenster (Tk)
 import matplotlib.pyplot as plt
 import numpy as np
 

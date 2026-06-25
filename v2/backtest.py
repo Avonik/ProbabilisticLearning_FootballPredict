@@ -111,6 +111,20 @@ USE_MULTI_CHAIN = True
 N_CHAINS        = 4
 CHAIN_JITTER_SD = 0.1
 
+# Informativer Prior aus Team-Marktwerten (Option A). USE_MARKET_PRIOR=False
+# ⇒ κ=0 ⇒ exakt das bisherige Modell. Die CSV-Werte MÜSSEN as-of Saisonstart
+# sein (leak-frei!), Spalten: Season, Team, MarketValue.
+USE_MARKET_PRIOR   = True
+MARKET_PRIOR_KAPPA = 0.10
+MARKET_VALUE_CSV   = "data_cache/transfermarkt_squad_values.csv"
+
+# Zusätzlich das PAPER-STANDARDMODELL (Rue & Salvesen 2000, unverändert) als
+# Vergleichsbalken? Gleiche Walk-Forward-Maschine, aber alle v2-Erweiterungen
+# AUS: Tore statt xG, feste Paper-Hyperparameter (τ=100, γ=0.10, ε=0.20),
+# 0-Prior. Zeigt, wie viel die v2-Anpassungen gegenüber dem Original bringen.
+# Kostet einen ZWEITEN Walk-Forward-Lauf (~doppelte Backtest-Laufzeit).
+INCLUDE_PAPER_BASELINE = True
+
 OUT = Path("output")
 OUT.mkdir(exist_ok=True)
 CACHE_DIR = Path("cache_v2")
@@ -220,6 +234,7 @@ def walkforward_predictions(
     seed: int = SEED, verbose: bool = True,
     n_chains: int = 1, jitter_sd: float = 0.1,
     continuous_xg: bool = USE_CONTINUOUS_XG, phi: float = PHI,
+    market_values: dict | None = None, market_kappa: float = 0.0,
 ) -> dict:
     """
     Liefert out-of-sample Modell-Wahrscheinlichkeiten für die Holdout-Spiele
@@ -276,7 +291,8 @@ def walkforward_predictions(
 
             L = build_league(df_prefix, use_xg=use_xg,
                              tau=tau, gamma=gamma, epsilon=eps,
-                             continuous_xg=continuous_xg, phi=phi)
+                             continuous_xg=continuous_xg, phi=phi,
+                             team_values=market_values, market_kappa=market_kappa)
             n_total = int(L.team_start[-1])
 
             # Warm-Start-Basis (zuletzt bekannte Stärken) + Iterationsbudget
@@ -411,19 +427,67 @@ def evaluate_season_walkforward(
     return comparison
 
 
+def add_paper_baseline(comparison: dict, df_full: pd.DataFrame, season: str, *,
+                       holdout_frac: float, n_chains: int, jitter_sd: float,
+                       verbose: bool = True) -> dict:
+    """Ergänzt ``comparison`` um das PAPER-STANDARDMODELL (Schlüssel 'paper').
+
+    Identische Walk-Forward-Maschine, aber alle v2-Erweiterungen AUS: Tore
+    statt xG, feste Paper-Hyperparameter (τ=100, γ=0.10, ε=0.20), 0-Prior.
+    Bewertung auf EXAKT denselben Holdout-Spielen wie das v2-Modell — die
+    Refit-Spieltage sind modell-unabhängig (Präfix-Split hängt nur an den
+    Daten), also ist probs_paper genau dort endlich, wo probs_model es ist.
+    """
+    if verbose:
+        print("\n  Paper-Standardmodell (Baseline: Tore + Paper-Defaults, "
+              "0-Prior) ...")
+    wf = walkforward_predictions(
+        df_full, season, use_xg=False,
+        tau=DEFAULT_TAU, gamma=DEFAULT_GAMMA, eps=DEFAULT_EPSILON,
+        holdout_frac=holdout_frac, verbose=verbose,
+        n_chains=n_chains, jitter_sd=jitter_sd,
+        market_values=None, market_kappa=0.0, continuous_xg=False,
+    )
+    probs_paper = wf["probs_model"]
+    out = comparison["outcomes"]
+    n, cutoff = comparison["n"], comparison["cutoff"]
+    hold = np.zeros(n, dtype=bool)
+    hold[cutoff:] = True
+    common = (hold
+              & np.all(np.isfinite(comparison["probs_model"]), axis=1)
+              & np.all(np.isfinite(comparison["probs_bookmaker"]), axis=1)
+              & np.all(np.isfinite(probs_paper), axis=1))
+    comparison["paper"] = evaluate_predictions(probs_paper[common], out[common])
+    comparison["probs_paper"] = probs_paper
+    return comparison
+
+
 def print_comparison(comparison: dict, season: str):
     nc = comparison.get("n_common", comparison["model"].get("n", 0))
     print(f"\n  Ehrliche Walk-Forward-Evaluation — Saison {season}")
     print(f"  Holdout (Modell ∩ Buchmacher): {nc} Spiele")
     print(f"\n  {'Quelle':<24} {'RPS':>10} {'LogLoss':>10} {'Brier':>10}")
     print(f"  {'-'*56}")
-    for key in ["model", "bookmaker", "empirical", "uniform"]:
+    labels = {"model": "Modell (v2)", "paper": "Paper-Standard (2000)",
+              "bookmaker": "Buchmacher", "empirical": "Basisrate",
+              "uniform": "Uniform"}
+    for key in ["model", "paper", "bookmaker", "empirical", "uniform"]:
+        if key not in comparison:
+            continue
         m = comparison[key]
-        print(f"  {key:<24} {m['rps']:>10.4f} {m['log_loss']:>10.4f} "
+        print(f"  {labels[key]:<24} {m['rps']:>10.4f} {m['log_loss']:>10.4f} "
               f"{m['brier']:>10.4f}")
 
     rps_m = comparison["model"]["rps"]
     rps_b = comparison["bookmaker"]["rps"]
+
+    if "paper" in comparison:
+        rps_p = comparison["paper"]["rps"]
+        if np.isfinite(rps_m) and np.isfinite(rps_p) and rps_p > 0:
+            impr = (rps_p - rps_m) / rps_p * 100.0
+            verdict_p = "v2 besser" if impr > 0 else "Paper besser"
+            print(f"\n  v2-Erweiterungen vs. Paper-Standard: "
+                  f"ΔRPS = {rps_p - rps_m:+.4f} ({impr:+.1f} % rel. — {verdict_p})")
     if np.isfinite(rps_m) and np.isfinite(rps_b) and rps_b > 0:
         rel = (rps_b - rps_m) / rps_b * 100.0
         verdict = ("Modell besser" if rel > 0 else "Buchmacher besser")
@@ -490,11 +554,26 @@ def main():
     n_chains = N_CHAINS if USE_MULTI_CHAIN else 1
     if n_chains > 1:
         print(f"  {n_chains} parallele Ketten pro Refit (R-hat-Diagnostik aktiv).")
+
+    market_values = None
+    market_kappa = 0.0
+    if USE_MARKET_PRIOR:
+        from market_value import team_market_values
+        market_values = team_market_values(ANALYSIS_SEASON, csv_path=MARKET_VALUE_CSV)
+        market_kappa = MARKET_PRIOR_KAPPA
+        print(f"  Marktwert-Prior aktiv (κ={market_kappa}, Werte as-of "
+              f"Saisonstart = leak-frei): {len(market_values)} Teams.")
+
     comparison = evaluate_season_walkforward(
         df, ANALYSIS_SEASON, use_xg=USE_XG,
         tau=tau, gamma=gamma, eps=eps, holdout_frac=HOLDOUT_FRAC,
         n_chains=n_chains, jitter_sd=CHAIN_JITTER_SD,
+        market_values=market_values, market_kappa=market_kappa,
     )
+    if INCLUDE_PAPER_BASELINE:
+        add_paper_baseline(comparison, df, ANALYSIS_SEASON,
+                           holdout_frac=HOLDOUT_FRAC, n_chains=n_chains,
+                           jitter_sd=CHAIN_JITTER_SD)
     print_comparison(comparison, ANALYSIS_SEASON)
 
     # 6) Plots (viz erst hier importieren → Ketten-Worker brauchen kein matplotlib)

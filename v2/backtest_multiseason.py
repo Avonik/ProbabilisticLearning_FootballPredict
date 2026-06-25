@@ -52,7 +52,8 @@ import backtest as bt   # Konfiguration + evaluate_season_walkforward (Quelle de
 # ─────────────────────────────────────────────────────────────────────
 # Konfiguration (modellspezifisches kommt aus backtest.py)
 # ─────────────────────────────────────────────────────────────────────
-SEASONS: list[str] | None = ["2016/17","2017/18","2018/19","2019/20","2020/21","2021/22","2022/23","2023/24","2024/25","2025/26"]   # None = auto: alle Saisons ≥ 2014/15 im DataFrame.
+SEASONS: list[str] | None = ["2022/23", "2023/24", "2024/25"]
+    #["2016/17","2017/18","2018/19","2019/20","2020/21","2021/22","2022/23","2023/24","2024/25","2025/26"]   # None = auto: alle Saisons ≥ 2014/15 im DataFrame.
                                    # Zum Kürzen z.B. ["2022/23", "2023/24", "2024/25"].
 SCRAMBLE_XG   = False              # Placebo / Negativ-Kontrolle (xG je Saison verwürfeln)
 SCRAMBLE_SEED = 123
@@ -101,6 +102,23 @@ def _per_match_rps(cmp: dict) -> tuple[np.ndarray, np.ndarray]:
     rps_m = np.array([rps_one(pm[i], out[i]) for i in np.where(common)[0]])
     rps_b = np.array([rps_one(pb[i], out[i]) for i in np.where(common)[0]])
     return rps_m, rps_b
+
+
+def _per_match_rps3(cmp: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-Spiel-RPS (Modell-v2, Paper-Baseline, Buchmacher) auf dem GEMEINSAMEN
+    Holdout (alle drei endlich). Setzt voraus, dass ``cmp['probs_paper']`` da ist
+    (via ``backtest.add_paper_baseline``)."""
+    pm, pp, pb = cmp["probs_model"], cmp["probs_paper"], cmp["probs_bookmaker"]
+    out = cmp["outcomes"]
+    n, cutoff = cmp["n"], cmp["cutoff"]
+    hold = np.arange(n) >= cutoff
+    fin = (np.all(np.isfinite(pm), axis=1) & np.all(np.isfinite(pp), axis=1)
+           & np.all(np.isfinite(pb), axis=1))
+    idx = np.where(hold & fin)[0]
+    rps_m = np.array([rps_one(pm[i], out[i]) for i in idx])
+    rps_p = np.array([rps_one(pp[i], out[i]) for i in idx])
+    rps_b = np.array([rps_one(pb[i], out[i]) for i in idx])
+    return rps_m, rps_p, rps_b
 
 
 def _paired_stats(rps_model: np.ndarray, rps_book: np.ndarray,
@@ -185,7 +203,7 @@ def main():
     n_chains = bt.N_CHAINS if bt.USE_MULTI_CHAIN else 1
 
     # 5) Walk-Forward je Saison, Per-Spiel-RPS poolen
-    all_m, all_b = [], []
+    all_m, all_b, all_p = [], [], []
     per_season = []
     for s in seasons:
         if bt.USE_TUNED_HYPERPARAMS:
@@ -194,41 +212,76 @@ def main():
             tau, gamma, eps = bt.DEFAULT_TAU, bt.DEFAULT_GAMMA, bt.DEFAULT_EPSILON
         print(f"\n  ── Saison {s}  (τ={tau}, γ={gamma}, ε={eps}) "
               f"{'─'*28}")
+        mv, mk = None, 0.0
+        if bt.USE_MARKET_PRIOR:
+            from market_value import team_market_values
+            mv = team_market_values(s, csv_path=bt.MARKET_VALUE_CSV)
+            mk = bt.MARKET_PRIOR_KAPPA
         cmp = bt.evaluate_season_walkforward(
             df, s, use_xg=bt.USE_XG, tau=tau, gamma=gamma, eps=eps,
             holdout_frac=bt.HOLDOUT_FRAC, verbose=True,
             n_chains=n_chains, jitter_sd=bt.CHAIN_JITTER_SD,
+            market_values=mv, market_kappa=mk,
         )
-        rps_m, rps_b = _per_match_rps(cmp)
+        if bt.INCLUDE_PAPER_BASELINE:
+            print("  + Paper-Standard-Baseline (zweiter Walk-Forward) ...")
+            bt.add_paper_baseline(cmp, df, s, holdout_frac=bt.HOLDOUT_FRAC,
+                                  n_chains=n_chains, jitter_sd=bt.CHAIN_JITTER_SD,
+                                  verbose=False)
+            rps_m, rps_p, rps_b = _per_match_rps3(cmp)
+            all_p.append(rps_p)
+        else:
+            rps_m, rps_b = _per_match_rps(cmp)
+            rps_p = None
         all_m.append(rps_m)
         all_b.append(rps_b)
         rel = (rps_b.mean() - rps_m.mean()) / rps_b.mean() * 100.0
-        per_season.append({
+        row = {
             "season": s, "n": len(rps_m),
             "rps_model": float(rps_m.mean()), "rps_book": float(rps_b.mean()),
             "d_rps": float(rps_b.mean() - rps_m.mean()), "rel": rel,
             "rhat": cmp.get("rhat_max"),
-        })
+        }
+        if rps_p is not None:
+            row["rps_paper"] = float(rps_p.mean())
+            row["d_paper"] = float(rps_p.mean() - rps_m.mean())  # >0 ⇒ v2 besser
+        per_season.append(row)
 
     rps_model = np.concatenate(all_m)
     rps_book = np.concatenate(all_b)
     stats = _paired_stats(rps_model, rps_book, BOOTSTRAP_N, BOOTSTRAP_SEED)
 
+    # v2 vs. Paper-Standardmodell (gepoolt, gepaart): diff = Paper − v2 (>0 = v2 besser)
+    have_paper = len(all_p) == len(seasons) and len(all_p) > 0
+    rps_paper = np.concatenate(all_p) if have_paper else None
+    stats_vp = (_paired_stats(rps_model, rps_paper, BOOTSTRAP_N, BOOTSTRAP_SEED)
+                if have_paper else None)
+
     # 6) Bericht
     print("\n" + "=" * 72)
     print(" ERGEBNIS")
     print("=" * 72)
-    print(f"\n  {'Saison':9} {'n':>4} {'RPS_Modell':>11} {'RPS_Buch':>10} "
-          f"{'ΔRPS':>9} {'rel%':>7} {'R-hat':>7}")
-    print("  " + "-" * 64)
+    if have_paper:
+        print(f"\n  {'Saison':9} {'n':>4} {'RPS_v2':>9} {'RPS_Paper':>10} "
+              f"{'RPS_Buch':>9} {'Δ(B-v2)':>9} {'Δ(v2-Pap)':>10} {'R-hat':>6}")
+        print("  " + "-" * 74)
+    else:
+        print(f"\n  {'Saison':9} {'n':>4} {'RPS_Modell':>11} {'RPS_Buch':>10} "
+              f"{'ΔRPS':>9} {'rel%':>7} {'R-hat':>7}")
+        print("  " + "-" * 64)
     n_better = 0
     for r in per_season:
         n_better += int(r["d_rps"] > 0)
         rh = f"{r['rhat']:.2f}" if r["rhat"] is not None and np.isfinite(r["rhat"]) else "—"
-        print(f"  {r['season']:9} {r['n']:>4} {r['rps_model']:>11.4f} "
-              f"{r['rps_book']:>10.4f} {r['d_rps']:>+9.4f} {r['rel']:>+7.1f} {rh:>7}")
+        if have_paper:
+            print(f"  {r['season']:9} {r['n']:>4} {r['rps_model']:>9.4f} "
+                  f"{r['rps_paper']:>10.4f} {r['rps_book']:>9.4f} "
+                  f"{r['d_rps']:>+9.4f} {r['d_paper']:>+10.4f} {rh:>6}")
+        else:
+            print(f"  {r['season']:9} {r['n']:>4} {r['rps_model']:>11.4f} "
+                  f"{r['rps_book']:>10.4f} {r['d_rps']:>+9.4f} {r['rel']:>+7.1f} {rh:>7}")
 
-    print("\n  Gepoolt (alle Spiele zusammen):")
+    print("\n  Gepoolt — Modell (v2) vs. Buchmacher:")
     print(f"    Spiele insgesamt:       n = {stats['n']}")
     print(f"    RPS Modell / Buchmacher: {rps_model.mean():.4f} / {rps_book.mean():.4f}")
     print(f"    mittleres ΔRPS (Buch−Modell): {stats['mean_diff']:+.5f} "
@@ -238,6 +291,26 @@ def main():
     print(f"    Wilcoxon-Signed-Rank p:       {stats['wilcoxon_p']:.4f}")
     print(f"    Spiele Modell besser:         {stats['frac_model_better']*100:.1f} %")
     print(f"    Saisons Modell besser:        {n_better}/{len(per_season)}")
+
+    if have_paper:
+        n_better_p = sum(int(r.get("d_paper", 0.0) > 0) for r in per_season)
+        print("\n  Gepoolt — v2 vs. Paper-Standardmodell (Effekt der Anpassungen):")
+        print(f"    RPS v2 / Paper:               {rps_model.mean():.4f} / {rps_paper.mean():.4f}")
+        print(f"    mittleres ΔRPS (Paper−v2):    {stats_vp['mean_diff']:+.5f} "
+              f"({stats_vp['rel_pct']:+.2f} % rel.)")
+        print(f"    Bootstrap-95%-CI von ΔRPS:    "
+              f"[{stats_vp['ci_lo']:+.5f}, {stats_vp['ci_hi']:+.5f}]")
+        print(f"    Wilcoxon-Signed-Rank p:       {stats_vp['wilcoxon_p']:.4f}")
+        print(f"    Spiele v2 besser als Paper:   {stats_vp['frac_model_better']*100:.1f} %")
+        print(f"    Saisons v2 besser als Paper:  {n_better_p}/{len(per_season)}")
+        sig_vp = ((stats_vp["ci_lo"] > 0 or stats_vp["ci_hi"] < 0)
+                  and stats_vp["wilcoxon_p"] < 0.05)
+        if sig_vp and stats_vp["mean_diff"] > 0:
+            print("    → v2 schlägt das Paper-Modell SIGNIFIKANT (CI schließt 0 aus, p<0.05).")
+        elif sig_vp and stats_vp["mean_diff"] < 0:
+            print("    → Paper-Modell SIGNIFIKANT besser als v2.")
+        else:
+            print("    → kein signifikanter Unterschied v2 vs. Paper (CI überdeckt 0).")
 
     # 7) Urteil
     sig = (stats["ci_lo"] > 0 or stats["ci_hi"] < 0) and stats["wilcoxon_p"] < 0.05

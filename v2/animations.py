@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")  # headless: nur Datei-Export, kein GUI-Fenster (Tk)
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.lines import Line2D

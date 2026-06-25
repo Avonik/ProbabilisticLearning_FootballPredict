@@ -169,8 +169,10 @@ def _time_prior_logpdf(val, prev_val, dt, sigma2, tau):
 
 
 @njit(cache=True, fastmath=True)
-def _initial_prior_logpdf(val, sigma2):
-    return -0.5 * np.log(2.0 * np.pi * sigma2) - 0.5 * val * val / sigma2
+def _initial_prior_logpdf(val, mu, sigma2):
+    # N(mu, sigma2): mu=0 reproduziert exakt den klassischen 0-Prior.
+    d = val - mu
+    return -0.5 * np.log(2.0 * np.pi * sigma2) - 0.5 * d * d / sigma2
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -187,6 +189,7 @@ def _run_chunk(
     obs_x, obs_y,
     # Hyperparameter
     c_x, c_y, gamma, epsilon, tau, sigma2,
+    init_prior_mean,         # shape (n_teams,): Prior-Mittel der Initial-Stärke
     max_k,
     continuous, phi,
     proposal_sd,
@@ -242,8 +245,11 @@ def _run_chunk(
                     # Prior aus vorherigem Spiel
                     log_alpha = 0.0
                     if local == 0:
-                        log_alpha += _initial_prior_logpdf(proposed, sigma2)
-                        log_alpha -= _initial_prior_logpdf(current, sigma2)
+                        # Initial-Stärke: informativer Prior um init_prior_mean[team]
+                        # (Marktwert-Baseline; 0 ⇒ klassischer 0-Prior).
+                        mu0 = init_prior_mean[team]
+                        log_alpha += _initial_prior_logpdf(proposed, mu0, sigma2)
+                        log_alpha -= _initial_prior_logpdf(current, mu0, sigma2)
                     else:
                         prev_idx = gidx - 1
                         dt = days_this - strength_days[prev_idx]
@@ -418,6 +424,12 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
     if init_delta is not None:
         delta[:] = np.asarray(init_delta, dtype=np.int64)
 
+    # Informativer Prior (Marktwert-Baseline); None ⇒ Nullvektor ⇒ 0-Prior.
+    if getattr(L, "init_prior_mean", None) is not None:
+        init_prior_mean = np.ascontiguousarray(L.init_prior_mean, dtype=np.float64)
+    else:
+        init_prior_mean = np.zeros(L.n_teams, dtype=np.float64)
+
     # Sample-Buffer-Größe vorab bestimmen
     n_post = max(0, n_iter - burnin)
     n_samples_target = (n_post + thin - 1) // thin
@@ -443,6 +455,7 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
             L.match_home_local, L.match_away_local,
             L.obs_x, L.obs_y,
             L.c_x, L.c_y, L.gamma, L.epsilon, L.tau, PRIOR_VAR,
+            init_prior_mean,
             MAX_GOALS,
             int(L.continuous_obs), L.phi,
             proposal_sd,
@@ -511,6 +524,7 @@ def warmup_jit():
     sa = np.zeros((1, 2))
     sd = np.zeros((1, 2))
     sdt = np.zeros((1, 1), dtype=np.int64)
+    ipm = np.zeros(2, dtype=np.float64)   # init_prior_mean: 2 Dummy-Teams
     # Beide Branch-Spezialisierungen kompilieren: diskret (int64-obs,
     # continuous=0) und kontinuierlich (float64-obs, continuous=1).
     _run_chunk(
@@ -519,6 +533,7 @@ def warmup_jit():
         home_idx, away_idx, match_home_local, match_away_local,
         obs_x, obs_y,
         0.5, 0.1, 0.1, 0.2, 100.0, 1.0 / 37.0,
+        ipm,
         5, 0, 5.0, 0.05, 0, 1, 0, 1, sa, sd, sdt, 0,
     )
     _run_chunk(
@@ -527,5 +542,6 @@ def warmup_jit():
         home_idx, away_idx, match_home_local, match_away_local,
         obs_x_f, obs_y_f,
         0.5, 0.1, 0.1, 0.2, 100.0, 1.0 / 37.0,
+        ipm,
         5, 1, 5.0, 0.05, 0, 1, 0, 1, sa, sd, sdt, 0,
     )

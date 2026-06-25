@@ -24,6 +24,8 @@ Neu in v2 (xG, Tuning, RPS):
 
 from __future__ import annotations
 
+import matplotlib
+matplotlib.use("Agg")  # headless: nur Datei-Export, kein GUI-Fenster (Tk)
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -696,12 +698,17 @@ def plot_rps_comparison(comparison: dict, save_path):
     """
     labels_de = {
         "model": "Modell\n(Rue-Salvesen v2)",
+        "paper": "Paper-Standard\n(Rue-Salvesen 2000)",
         "bookmaker": "Buchmacher\n(Pinnacle/Markt)",
         "empirical": "Basisrate\n(historisch)",
         "uniform": "Uniform\n(1/3, 1/3, 1/3)",
     }
-    keys = ["model", "bookmaker", "empirical", "uniform"]
-    colors = [PALETTE[0], PALETTE[3], PALETTE[2], "#999999"]
+    color_map = {"model": PALETTE[0], "paper": PALETTE[1], "bookmaker": PALETTE[3],
+                 "empirical": PALETTE[2], "uniform": "#999999"}
+    # 'paper' nur zeigen, wenn die Baseline berechnet wurde (optional).
+    keys = [k for k in ["model", "paper", "bookmaker", "empirical", "uniform"]
+            if k in comparison]
+    colors = [color_map[k] for k in keys]
 
     metrics = [("rps", "RPS  (niedriger = besser)"),
                ("log_loss", "Log-Loss  (niedriger = besser)"),
