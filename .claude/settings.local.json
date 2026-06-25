@@ -10,7 +10,12 @@
       "Bash(grep -vE \"Lade|Gesamt|xG-|Numba|^\\\\s*$\")",
       "Bash(.venv/Scripts/python.exe _seedtest.py)",
       "Bash(../.venv/Scripts/python.exe _smoke.py)",
-      "Bash(../.venv/Scripts/python.exe _equiv.py)"
+      "Bash(../.venv/Scripts/python.exe _equiv.py)",
+      "Bash(python -c \"import PyPDF2,sys; r=PyPDF2.PdfReader\\(r'C:/Users/julia/PythonProject/RueUndSalvenson/paper/1467-9884.00243.pdf'\\); print\\(len\\(r.pages\\),'pages'\\)\")",
+      "Bash(pdfinfo \"C:/Users/julia/PythonProject/RueUndSalvenson/paper/1467-9884.00243.pdf\")",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(git -C \"C:\\\\Users\\\\julia\\\\PythonProject\\\\RueUndSalvenson\" ls-files)",
+      "Bash(xargs -I{} du -h \"{}\")"
     ]
   }
 }

@@ -37,6 +37,7 @@ import pickle
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 try:
@@ -125,9 +126,22 @@ MARKET_VALUE_CSV   = "data_cache/transfermarkt_squad_values.csv"
 # Kostet einen ZWEITEN Walk-Forward-Lauf (~doppelte Backtest-Laufzeit).
 INCLUDE_PAPER_BASELINE = True
 
-OUT = Path("output")
-OUT.mkdir(exist_ok=True)
+OUTPUT_ROOT = Path("output")
+OUT = OUTPUT_ROOT
 CACHE_DIR = Path("cache_v2")
+
+
+def timestamped_output_dir(prefix: str) -> Path:
+    OUTPUT_ROOT.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = OUTPUT_ROOT / f"{prefix}_{stamp}"
+    out = base
+    i = 2
+    while out.exists():
+        out = OUTPUT_ROOT / f"{base.name}_{i}"
+        i += 1
+    out.mkdir(parents=True)
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -508,7 +522,11 @@ def print_comparison(comparison: dict, season: str):
 # Main
 # ─────────────────────────────────────────────────────────────────────
 def main():
+    global OUT
     t_start = time.time()
+    season_tag = ANALYSIS_SEASON.replace("/", "_")
+    OUT = timestamped_output_dir(f"backtest_{season_tag}")
+    print(f"  Output directory: {OUT.resolve()}")
     print("=" * 64)
     print(" EHRLICHER WALK-FORWARD-BUCHMACHER-VERGLEICH")
     print("=" * 64)

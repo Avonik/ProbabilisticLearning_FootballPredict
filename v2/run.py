@@ -28,6 +28,7 @@ from __future__ import annotations
 import pickle
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 # UTF-8-Konsole auch unter Windows (sonst UnicodeEncodeError bei τ, →, ⌀, ...)
@@ -120,13 +121,26 @@ USE_MARKET_PRIOR   = True
 MARKET_PRIOR_KAPPA = 0.10
 MARKET_VALUE_CSV   = "data_cache/transfermarkt_squad_values.csv"
 
-OUT = Path("output")
-OUT.mkdir(exist_ok=True)
+OUTPUT_ROOT = Path("output")
+OUT = OUTPUT_ROOT
 
 CACHE_DIR = Path("cache_v2")
 CACHE_DIR.mkdir(exist_ok=True)
 MCMC_CACHE = CACHE_DIR / f"mcmc_{ANALYSIS_SEASON.replace('/','_')}_{N_CHAINS}c_{N_ITER}i_{'xg' if USE_XG else 'goals'}.pkl"
 TUNE_CACHE = CACHE_DIR / f"tune_{TUNE_MODE}_{ANALYSIS_SEASON.replace('/','_')}_{'xg' if USE_XG else 'goals'}.pkl"
+
+
+def timestamped_output_dir(prefix: str) -> Path:
+    OUTPUT_ROOT.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = OUTPUT_ROOT / f"{prefix}_{stamp}"
+    out = base
+    i = 2
+    while out.exists():
+        out = OUTPUT_ROOT / f"{base.name}_{i}"
+        i += 1
+    out.mkdir(parents=True)
+    return out
 
 
 def banner(title: str):
@@ -136,7 +150,11 @@ def banner(title: str):
 
 
 def main():
+    global OUT
     t_start = time.time()
+    season_tag = ANALYSIS_SEASON.replace("/", "_")
+    OUT = timestamped_output_dir(f"run_{season_tag}")
+    print(f"  Output directory: {OUT.resolve()}")
 
     # ─── Phase 1: Daten laden ────────────────────────────────────────
     banner("PHASE 1: Datenladung (inkl. Schüsse + Buchmacherquoten)")
