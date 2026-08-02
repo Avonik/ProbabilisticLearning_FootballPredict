@@ -1,0 +1,133 @@
+{"kind":"deck","id":"pr/9od9wi","name":"Deck"}
+{"kind":"layout","layoutId":"c7e98b9f-04b2-4213-96fa-7c2b6dbba75c","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"87be9236-3ede-4295-8fd3-54621dff5305","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/xgp0mw","slide":1,"title":"Julian - Implementation","textShapes":13}
+{"kind":"textbox","id":"sh/pg3ex0nu","slide":1,"name":"kicker","text":"Julian - Implementation","textPreview":"Julian - Implementation","textChars":23,"textLines":1,"bbox":[42,30,760,26]}
+{"kind":"textbox","id":"sh/epkzupwb","slide":1,"name":"title","text":"Was wurde konkret umgesetzt?","textPreview":"Was wurde konkret umgesetzt?","textChars":28,"textLines":1,"bbox":[42,62,1120,72]}
+{"kind":"shape","id":"sh/7adsji5s","slide":1,"bbox":[42,170,18,18]}
+{"kind":"textbox","id":"sh/w7mp0bi9","slide":1,"name":"Daten-head","text":"Daten","textPreview":"Daten","textChars":5,"textLines":1,"bbox":[42,206,350,44]}
+{"kind":"textbox","id":"sh/psfil0rq","slide":1,"name":"Daten-body","text":"Bundesliga 2000-2026\nClosing Odds\nUnderstat-xG ab 2014/15\nTransfermarkt-Prior vor Saisonstart","textPreview":"Bundesliga 2000-2026 | Closing Odds | Understat-xG ab 2014/15 | Transfermarkt-Prior vor Saisonstart","textChars":93,"textLines":4,"bbox":[42,266,352,190]}
+{"kind":"shape","id":"sh/e1w7mp0b","slide":1,"name":"Daten-file-panel","bbox":[42,505,352,80]}
+{"kind":"textbox","id":"sh/7mp0bi9s","slide":1,"name":"Daten-files","text":"data.py, xg.py, real_xg.py, market_value.py","textPreview":"data.py, xg.py, real_xg.py, market_value.py","textChars":43,"textLines":1,"bbox":[60,526,316,42]}
+{"kind":"shape","id":"sh/wfyxobm5","slide":1,"bbox":[453,170,18,18]}
+{"kind":"textbox","id":"sh/l0rqd4vm","slide":1,"name":"Modell-head","text":"Modell","textPreview":"Modell","textChars":6,"textLines":1,"bbox":[453,206,350,44]}
+{"kind":"textbox","id":"sh/hk3q5o7q","slide":1,"name":"Modell-body","text":"Paper-Struktur bleibt\nxG als kontinuierliche Messung\nGamma-Likelihood im Fit\nDiskrete W/D/L-Vorhersage bleibt","textPreview":"Paper-Struktur bleibt | xG als kontinuierliche Messung | Gamma-Likelihood im Fit | Diskrete W/D/L-Vorhersage bleibt","textChars":109,"textLines":4,"bbox":[453,266,352,190]}
+{"kind":"shape","id":"sh/oza1gvy9","slide":1,"name":"Modell-file-panel","bbox":[453,505,352,80]}
+{"kind":"textbox","id":"sh/zed8v6ps","slide":1,"name":"Modell-files","text":"model.py, mcmc.py","textPreview":"model.py, mcmc.py","textChars":17,"textLines":1,"bbox":[471,526,316,42]}
+{"kind":"shape","id":"sh/6xkf6dcb","slide":1,"bbox":[864,170,18,18]}
+{"kind":"textbox","id":"sh/hwfyxobm","slide":1,"name":"Evaluation-head","text":"Evaluation","textPreview":"Evaluation","textChars":10,"textLines":1,"bbox":[864,206,350,44]}
+{"kind":"textbox","id":"sh/obm58z25","slide":1,"name":"Evaluation-body","text":"Walk-forward statt Smoothing\nWarm-start Refit pro Spieltag\n4 MCMC-Ketten + R-hat\ngepaarte Multi-Season-Tests","textPreview":"Walk-forward statt Smoothing | Warm-start Refit pro Spieltag | 4 MCMC-Ketten + R-hat | gepaarte Multi-Season-Tests","textChars":108,"textLines":4,"bbox":[864,266,352,190]}
+{"kind":"shape","id":"sh/zqtcj6to","slide":1,"name":"Evaluation-file-panel","bbox":[864,505,352,80]}
+{"kind":"textbox","id":"sh/65wjudg7","slide":1,"name":"Evaluation-files","text":"backtest.py, backtest_multiseason.py","textPreview":"backtest.py, backtest_multiseason.py","textChars":36,"textLines":1,"bbox":[882,526,316,42]}
+{"kind":"textbox","id":"sh/h0fepkzu","slide":1,"name":"footer-source","text":"Quelle: Projektcode v2 und Rue & Salvesen (2000)","textPreview":"Quelle: Projektcode v2 und Rue & Salvesen (2000)","textChars":48,"textLines":1,"bbox":[42,666,980,28]}
+{"kind":"textbox","id":"sh/sfil0rqd","slide":1,"name":"footer-number","text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[1195,666,44,28]}
+{"kind":"notes","id":"nt/xgp0mw","slide":1,"text":"Ich uebernehme jetzt den konkreten Umsetzungsteil. Wichtig ist: Wir haben nicht nur ein paar Variablen ergaenzt, sondern die Pipeline in drei Bereichen umgebaut.\nErstens die Daten: Bundesliga statt Premier League 1997/98, dazu Closing Odds, echtes Understat-xG und Marktwerte vor Saisonstart.\nZweitens das Modell: Die Rue-Salvesen-Struktur mit Attack/Defense ueber Zeit bleibt, aber das beobachtete Signal im Fit wird moderner.\nDrittens die Evaluation: Der zentrale Umbau ist Walk-forward. Damit trennen wir retrospektive Analyse von echter Vorhersage."}
+{"kind":"slide","id":"sl/3m2mvc","slide":2,"title":"Leak-freier Backtest","textShapes":16}
+{"kind":"textbox","id":"sh/c7u54zid","slide":2,"name":"kicker","text":"Leak-freier Backtest","textPreview":"Leak-freier Backtest","textChars":20,"textLines":1,"bbox":[42,30,760,26]}
+{"kind":"textbox","id":"sh/jm1cfa9w","slide":2,"name":"title","text":"Retrospektive ist keine Vorhersage","textPreview":"Retrospektive ist keine Vorhersage","textChars":34,"textLines":1,"bbox":[42,62,1120,72]}
+{"kind":"shape","id":"sh/u18jqh0f","slide":2,"name":"Alter Vergleich-panel","bbox":[64,198,275,250]}
+{"kind":"shape","id":"sh/1032lszq","slide":2,"bbox":[88,226,18,18]}
+{"kind":"textbox","id":"sh/cfa9w3m9","slide":2,"name":"Alter Vergleich-title","text":"Alter Vergleich","textPreview":"Alter Vergleich","textChars":15,"textLines":1,"bbox":[88,260,227,42]}
+{"kind":"textbox","id":"sh/judg7ads","slide":2,"name":"Alter Vergleich-body","text":"Fit auf ganzer Saison\nPosterior kennt Zukunft\nscheinbar +4% vs Buchmacher","textPreview":"Fit auf ganzer Saison | Posterior kennt Zukunft | scheinbar +4% vs Buchmacher","textChars":73,"textLines":3,"bbox":[88,314,227,100]}
+{"kind":"shape","id":"sh/u9knih4b","slide":2,"name":"Leak-Audit-panel","bbox":[382,198,275,250]}
+{"kind":"shape","id":"sh/54zidony","slide":2,"bbox":[406,226,18,18]}
+{"kind":"textbox","id":"sh/cj6tovah","slide":2,"name":"Leak-Audit-title","text":"Leak-Audit","textPreview":"Leak-Audit","textChars":10,"textLines":1,"bbox":[406,260,227,42]}
+{"kind":"textbox","id":"sh/ex0nuxc3","slide":2,"name":"Leak-Audit-body","text":"Smoothing-Leak\nxG-beta auf Holdout\nc_x/c_y auf Vollsaison","textPreview":"Smoothing-Leak | xG-beta auf Holdout | c_x/c_y auf Vollsaison","textChars":57,"textLines":3,"bbox":[406,314,227,100]}
+{"kind":"shape","id":"sh/3itgfmlk","slide":2,"name":"Walk-forward-panel","bbox":[700,198,275,250]}
+{"kind":"shape","id":"sh/w3m94fu1","slide":2,"bbox":[724,226,18,18]}
+{"kind":"textbox","id":"sh/loj2t83i","slide":2,"name":"Walk-forward-title","text":"Walk-forward","textPreview":"Walk-forward","textChars":12,"textLines":1,"bbox":[724,260,227,42]}
+{"kind":"textbox","id":"sh/e9cvixcz","slide":2,"name":"Walk-forward-body","text":"Trainiere nur Datum < d\nVorhersage Spieltag d\nScore auf gleichem Holdout","textPreview":"Trainiere nur Datum < d | Vorhersage Spieltag d | Score auf gleichem Holdout","textChars":72,"textLines":3,"bbox":[724,314,227,100]}
+{"kind":"textbox","id":"sh/3q5o7qpg","slide":2,"name":"flow-arrow-1","text":">","textPreview":">","textChars":1,"textLines":1,"bbox":[344,296,48,46]}
+{"kind":"textbox","id":"sh/wb2hwfyx","slide":2,"name":"flow-arrow-2","text":">","textPreview":">","textChars":1,"textLines":1,"bbox":[662,296,48,46]}
+{"kind":"shape","id":"sh/lwval87e","slide":2,"name":"rps-panel","bbox":[1018,198,190,250]}
+{"kind":"textbox","id":"sh/ahoza1gv","slide":2,"name":"rps-title","text":"RPS","textPreview":"RPS","textChars":3,"textLines":1,"bbox":[1044,229,140,54]}
+{"kind":"textbox","id":"sh/32lszqtc","slide":2,"name":"rps-note","text":"lower\nis better","textPreview":"lower | is better","textChars":15,"textLines":2,"bbox":[1044,302,140,66]}
+{"kind":"textbox","id":"sh/v6psfil0","slide":2,"name":"rps-small","text":"gleiche Spiele\nfuer Modell,\nPaper und Odds","textPreview":"gleiche Spiele | fuer Modell, | Paper und Odds","textChars":42,"textLines":3,"bbox":[1041,382,145,54]}
+{"kind":"textbox","id":"sh/2lszqtcj","slide":2,"name":"main-claim","text":"Der Vorhersagezustand am Spieltag d ist p(strength_d | games < d), nicht p(strength_d | ganze Saison).","textPreview":"Der Vorhersagezustand am Spieltag d ist p(strength_d | games < d), nicht p(strength_d | ganze Saison).","textChars":102,"textLines":1,"bbox":[84,500,1060,62]}
+{"kind":"textbox","id":"sh/d8bat47y","slide":2,"name":"footer-source","text":"Code: v2/backtest.py: walkforward_predictions, evaluate_season_walkforward","textPreview":"Code: v2/backtest.py: walkforward_predictions, evaluate_season_walkforward","textChars":74,"textLines":1,"bbox":[42,666,980,28]}
+{"kind":"textbox","id":"sh/knih4byh","slide":2,"name":"footer-number","text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[1195,666,44,28]}
+{"kind":"notes","id":"nt/3m2mvc","slide":2,"text":"Das ist der wichtigste methodische Punkt. In der ersten Version sah es so aus, als wuerden wir Buchmacher schlagen. Dann haben wir den Vergleich auditiert.\nDas Hauptproblem war Smoothing: Wenn ich eine ganze Saison fitten lasse, beeinflussen spaetere Spiele die Teamstaerke an frueheren Spieltagen. Das ist fuer Retrospektive okay, aber fuer Prediction ein Leak.\nIn backtest.py fitten wir deshalb fuer jeden Holdout-Spieltag nur auf Spiele vor diesem Datum, starten den naechsten Refit warm und bewerten alle Modelle auf exakt denselben Spielen mit RPS.\nDas macht die Ergebnisse weniger spektakulaer, aber viel glaubwuerdiger."}
+{"kind":"slide","id":"sl/7wbche","slide":3,"title":"Modell-Upgrade","textShapes":13}
+{"kind":"textbox","id":"sh/032lszqt","slide":3,"name":"kicker","text":"Modell-Upgrade","textPreview":"Modell-Upgrade","textChars":14,"textLines":1,"bbox":[42,30,760,26]}
+{"kind":"textbox","id":"sh/bi9s36hc","slide":3,"name":"title","text":"xG wird zur Beobachtung von lambda","textPreview":"xG wird zur Beobachtung von lambda","textChars":34,"textLines":1,"bbox":[42,62,1120,72]}
+{"kind":"shape","id":"sh/ixczed8v","slide":3,"name":"equation-panel","bbox":[54,165,535,385]}
+{"kind":"textbox","id":"sh/p0bi9s36","slide":3,"name":"paper-fit-title","text":"Paper-Fit","textPreview":"Paper-Fit","textChars":9,"textLines":1,"bbox":[86,198,210,36]}
+{"kind":"textbox","id":"sh/0fepkzup","slide":3,"name":"paper-fit-body","text":"Goals x,y ~ Poisson(lambda)\n+ Dixon-Coles correction\n+ epsilon mixture for outliers","textPreview":"Goals x,y ~ Poisson(lambda) | + Dixon-Coles correction | + epsilon mixture for outliers","textChars":83,"textLines":3,"bbox":[86,246,460,100]}
+{"kind":"textbox","id":"sh/bulwval8","slide":3,"name":"v2-fit-title","text":"v2-Fit","textPreview":"v2-Fit","textChars":6,"textLines":1,"bbox":[86,382,210,36]}
+{"kind":"textbox","id":"sh/i9s36hcr","slide":3,"name":"v2-fit-body","text":"xG ~ Gamma(shape=phi, rate=phi/lambda)\nE[xG]=lambda, Var[xG]=lambda^2/phi\nPrediction remains a discrete goal grid","textPreview":"xG ~ Gamma(shape=phi, rate=phi/lambda) | E[xG]=lambda, Var[xG]=lambda^2/phi | Prediction remains a discrete goal grid","textChars":113,"textLines":3,"bbox":[86,430,460,88]}
+{"kind":"textbox","id":"sh/t47y1kre","slide":3,"name":"why-title","text":"Warum?","textPreview":"Warum?","textChars":6,"textLines":1,"bbox":[646,166,230,44]}
+{"kind":"shape","id":"sh/0je9cvix","slide":3,"bbox":[653,229,18,18]}
+{"kind":"textbox","id":"sh/a5gbq1or","slide":3,"name":"reason","text":"Tore sind verrauscht: Effizienz und Zufall dominieren einzelne Spiele.","textPreview":"Tore sind verrauscht: Effizienz und Zufall dominieren einzelne Spiele.","textChars":70,"textLines":1,"bbox":[690,225,505,60]}
+{"kind":"shape","id":"sh/3m94fu18","slide":3,"bbox":[653,322,18,18]}
+{"kind":"textbox","id":"sh/s72x4nap","slide":3,"name":"reason","text":"xG misst Chancenqualität direkter und aktualisiert Teamstärken stabiler.","textPreview":"xG misst Chancenqualität direkter und aktualisiert Teamstärken stabiler.","textChars":72,"textLines":1,"bbox":[690,318,505,60]}
+{"kind":"shape","id":"sh/lszqtcj6","slide":3,"bbox":[653,415,18,18]}
+{"kind":"textbox","id":"sh/adsji5sn","slide":3,"name":"reason","text":"phi steuert Vertrauen in xG; zu hoch überfittet grobe Proxy-xG.","textPreview":"phi steuert Vertrauen in xG; zu hoch überfittet grobe Proxy-xG.","textChars":63,"textLines":1,"bbox":[690,411,505,60]}
+{"kind":"shape","id":"sh/3ylc7u54","slide":3,"bbox":[653,508,18,18]}
+{"kind":"textbox","id":"sh/sji5snel","slide":3,"name":"reason","text":"Echtes Understat-xG ersetzt den Proxy ab 2014/15.","textPreview":"Echtes Understat-xG ersetzt den Proxy ab 2014/15.","textChars":49,"textLines":1,"bbox":[690,504,505,60]}
+{"kind":"textbox","id":"sh/h4byhgn2","slide":3,"name":"footer-source","text":"Code: model.build_league(...continuous_xg=True), mcmc._gamma_loglik_lam, real_xg.py","textPreview":"Code: model.build_league(...continuous_xg=True), mcmc._gamma_loglik_lam, real_xg.py","textChars":83,"textLines":1,"bbox":[42,666,980,28]}
+{"kind":"textbox","id":"sh/ap4r65wj","slide":3,"name":"footer-number","text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[1195,666,44,28]}
+{"kind":"notes","id":"nt/7wbche","slide":3,"text":"Der zweite konkrete Umbau ist das Beobachtungsmodell. Das latente Modell bleibt Rue und Salvesen: Angriff und Abwehr eines Teams entwickeln sich ueber die Zeit und erzeugen eine Torintensitaet lambda.\nIm Original wird aber direkt auf Tore gefittet. Wir haben zunaechst xG benutzt, aber gemerkt: gerundetes xG in einer Poisson-Likelihood ist unbefriedigend.\nDeshalb behandeln wir xG als kontinuierliche Messung der Intensitaet lambda. Im MCMC-Kern ist das die Gamma-Likelihood. phi ist dabei eine Praezision: je groesser phi, desto staerker vertraut das Modell dem xG.\nWichtig: Die Vorhersage bleibt diskret. Am Ende berechnen wir weiter P(Heimsieg/Unentschieden/Auswaertssieg) ueber ein Poisson-Torgitter."}
+{"kind":"slide","id":"sl/4m2ygy","slide":4,"title":"Resultat 1 - pooled 2016/17 bis 2025/26","textShapes":13}
+{"kind":"textbox","id":"sh/8z25kb6x","slide":4,"name":"kicker","text":"Resultat 1 - pooled 2016/17 bis 2025/26","textPreview":"Resultat 1 - pooled 2016/17 bis 2025/26","textChars":39,"textLines":1,"bbox":[42,30,760,26]}
+{"kind":"textbox","id":"sh/je9cvixc","slide":4,"name":"title","text":"v2 verbessert das Paper-Modell klar","textPreview":"v2 verbessert das Paper-Modell klar","textChars":35,"textLines":1,"bbox":[42,62,1120,72]}
+{"kind":"shape","id":"sh/qtcj6tov","slide":4,"name":"chart-panel","bbox":[58,154,650,462]}
+{"kind":"textbox","id":"sh/87ed8bat","slide":4,"name":"chart-caption","text":"Mean RPS auf gemeinsamen Holdout-Spielen - lower is better","textPreview":"Mean RPS auf gemeinsamen Holdout-Spielen - lower is better","textChars":58,"textLines":1,"bbox":[103,562,540,25]}
+{"kind":"shape","id":"sh/fmlkjm1c","slide":4,"name":"metric-panel","bbox":[760,168,210,170]}
+{"kind":"textbox","id":"sh/q1orytsv","slide":4,"name":"metric-value","text":"925","textPreview":"925","textChars":3,"textLines":1,"bbox":[782,192,166,64]}
+{"kind":"textbox","id":"sh/x4nap4r6","slide":4,"name":"metric-label","text":"Holdout-Spiele","textPreview":"Holdout-Spiele","textChars":14,"textLines":1,"bbox":[784,270,162,50]}
+{"kind":"shape","id":"sh/8jqh0fep","slide":4,"name":"metric-panel","bbox":[1000,168,210,170]}
+{"kind":"textbox","id":"sh/mp0bi9s3","slide":4,"name":"metric-value","text":"+3.7%","textPreview":"+3.7%","textChars":5,"textLines":1,"bbox":[1022,192,166,64]}
+{"kind":"textbox","id":"sh/bat47y1k","slide":4,"name":"metric-label","text":"rel. besser als Paper","textPreview":"rel. besser als Paper","textChars":21,"textLines":1,"bbox":[1024,270,162,50]}
+{"kind":"shape","id":"sh/4vmtwra5","slide":4,"name":"metric-panel","bbox":[760,382,210,170]}
+{"kind":"textbox","id":"sh/tgfmlkjm","slide":4,"name":"metric-value","text":"+0.0078","textPreview":"+0.0078","textChars":7,"textLines":1,"bbox":[782,406,166,64]}
+{"kind":"textbox","id":"sh/m1cfa9w3","slide":4,"name":"metric-label","text":"Delta RPS: Paper - v2","textPreview":"Delta RPS: Paper - v2","textChars":21,"textLines":1,"bbox":[784,484,162,50]}
+{"kind":"shape","id":"sh/bm58z25k","slide":4,"name":"metric-panel","bbox":[1000,382,210,170]}
+{"kind":"textbox","id":"sh/47y1kre1","slide":4,"name":"metric-value","text":"p<0.001","textPreview":"p<0.001","textChars":7,"textLines":1,"bbox":[1022,406,166,64]}
+{"kind":"textbox","id":"sh/tsvu9kni","slide":4,"name":"metric-label","text":"Wilcoxon paired","textPreview":"Wilcoxon paired","textChars":15,"textLines":1,"bbox":[1024,484,162,50]}
+{"kind":"textbox","id":"sh/m58z25kb","slide":4,"name":"footer-source","text":"Daten: v2/output/multiseason_20260625_200345/multiseason_summary.csv","textPreview":"Daten: v2/output/multiseason_20260625_200345/multiseason_summary.csv","textChars":68,"textLines":1,"bbox":[42,666,980,28]}
+{"kind":"textbox","id":"sh/bq1oryts","slide":4,"name":"footer-number","text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[1195,666,44,28]}
+{"kind":"chart","id":"ch/x0nuxc3y","slide":4,"name":"","chartType":"bar","bbox":[92,198,582,350]}
+{"kind":"notes","id":"nt/4m2ygy","slide":4,"text":"Jetzt zu den Ergebnissen. Bewertet wird mit RPS, also einer proper scoring rule fuer drei geordnete Outcomes: Heimsieg, Remis, Auswaertssieg. Niedriger ist besser.\nGegenueber dem unveraenderten Paper-Standardmodell ist der Effekt klar: v2 hat im Schnitt 0.2030 RPS, das Paper 0.2108.\nDie gepaarte Differenz Paper minus v2 ist +0.0078 RPS, also rund 3.7 Prozent relativ. Das 95-Prozent-Bootstrap-Intervall liegt komplett ueber Null, und der Wilcoxon-Test ist sehr deutlich.\nDas ist die saubere Antwort auf die Aufgabenstellung: Unsere Verbesserungen bringen gegenueber dem nachgebauten Paper-Modell messbar etwas."}
+{"kind":"slide","id":"sl/7zxmkw","slide":5,"title":"Resultat 2 - Interpretation","textShapes":21}
+{"kind":"textbox","id":"sh/ih4byhgn","slide":5,"name":"kicker","text":"Resultat 2 - Interpretation","textPreview":"Resultat 2 - Interpretation","textChars":27,"textLines":1,"bbox":[42,30,760,26]}
+{"kind":"textbox","id":"sh/p8nqxs72","slide":5,"name":"title","text":"Buchmacher bleiben der harte Benchmark","textPreview":"Buchmacher bleiben der harte Benchmark","textChars":38,"textLines":1,"bbox":[42,62,1120,72]}
+{"kind":"shape","id":"sh/0nuxc3yl","slide":5,"name":"effect-panel","bbox":[48,145,1184,360]}
+{"kind":"shape","id":"sh/7ed8bat4","slide":5,"bbox":[190,398,925,2]}
+{"kind":"shape","id":"sh/itgfmlkj","slide":5,"bbox":[560,206,3,215]}
+{"kind":"shape","id":"sh/pkzupwb2","slide":5,"bbox":[190,393,1,11]}
+{"kind":"textbox","id":"sh/0z61032l","slide":5,"name":"axis-tick","text":"-.010","textPreview":"-.010","textChars":5,"textLines":1,"bbox":[158,412,64,20]}
+{"kind":"shape","id":"sh/7qpg3ex0","slide":5,"bbox":[375,393,1,11]}
+{"kind":"textbox","id":"sh/i5sneloj","slide":5,"name":"axis-tick","text":"-.005","textPreview":"-.005","textChars":5,"textLines":1,"bbox":[343,412,64,20]}
+{"kind":"shape","id":"sh/0nuxc3yl","slide":5,"bbox":[560,393,1,11]}
+{"kind":"textbox","id":"sh/p8nqxs72","slide":5,"name":"axis-tick","text":"0","textPreview":"0","textChars":1,"textLines":1,"bbox":[528,412,64,20]}
+{"kind":"shape","id":"sh/ih4byhgn","slide":5,"bbox":[745,393,1,11]}
+{"kind":"textbox","id":"sh/72x4nap4","slide":5,"name":"axis-tick","text":".005","textPreview":".005","textChars":4,"textLines":1,"bbox":[713,412,64,20]}
+{"kind":"shape","id":"sh/0z61032l","slide":5,"bbox":[930,393,1,11]}
+{"kind":"textbox","id":"sh/pkzupwb2","slide":5,"name":"axis-tick","text":".010","textPreview":".010","textChars":4,"textLines":1,"bbox":[898,412,64,20]}
+{"kind":"shape","id":"sh/itgfmlkj","slide":5,"bbox":[1115,393,1,11]}
+{"kind":"textbox","id":"sh/7ed8bat4","slide":5,"name":"axis-tick","text":".015","textPreview":".015","textChars":4,"textLines":1,"bbox":[1083,412,64,20]}
+{"kind":"textbox","id":"sh/0bi9s36h","slide":5,"name":"ci-label","text":"v2 vs Buchmacher","textPreview":"v2 vs Buchmacher","textChars":16,"textLines":1,"bbox":[86,224,260,30]}
+{"kind":"textbox","id":"sh/pwb2hwfy","slide":5,"name":"ci-detail","text":"mean -0.0036, 95%-CI [-0.0075, +0.0004]","textPreview":"mean -0.0036, 95%-CI [-0.0075, +0.0004]","textChars":39,"textLines":1,"bbox":[86,260,300,28]}
+{"kind":"shape","id":"sh/94fu18jq","slide":5,"bbox":[281.88,248,291.26,5]}
+{"kind":"shape","id":"sh/kjm1cfa9","slide":5,"bbox":[279.88,235,4,31]}
+{"kind":"shape","id":"sh/r2p8nqxs","slide":5,"bbox":[571.14,235,4,31]}
+{"kind":"shape","id":"sh/2hwfyxob","slide":5,"bbox":[418.2,239,20,20]}
+{"kind":"textbox","id":"sh/9gr2p8nq","slide":5,"name":"ci-label","text":"v2 vs Paper","textPreview":"v2 vs Paper","textChars":11,"textLines":1,"bbox":[86,314,260,30]}
+{"kind":"textbox","id":"sh/gvy90je9","slide":5,"name":"ci-detail","text":"mean +0.0078, 95%-CI [+0.0033, +0.0122]","textPreview":"mean +0.0078, 95%-CI [+0.0033, +0.0122]","textChars":39,"textLines":1,"bbox":[86,350,300,28]}
+{"kind":"shape","id":"sh/ra5gbq1o","slide":5,"bbox":[683.66,338,326.71,5]}
+{"kind":"shape","id":"sh/2p8nqxs7","slide":5,"bbox":[681.66,325,4,31]}
+{"kind":"shape","id":"sh/9knih4by","slide":5,"bbox":[1008.37,325,4,31]}
+{"kind":"shape","id":"sh/kzupwb2h","slide":5,"bbox":[838.81,329,20,20]}
+{"kind":"textbox","id":"sh/u18jqh0f","slide":5,"name":"axis-caption","text":"Delta RPS, positiv = v2 besser","textPreview":"Delta RPS, positiv = v2 besser","textChars":30,"textLines":1,"bbox":[470,456,370,24]}
+{"kind":"shape","id":"sh/jm1cfa9w","slide":5,"bbox":[62,538,18,18]}
+{"kind":"textbox","id":"sh/c7u54zid","slide":5,"name":"takeaway-title","text":"Paper geschlagen","textPreview":"Paper geschlagen","textChars":16,"textLines":1,"bbox":[98,529,315,34]}
+{"kind":"textbox","id":"sh/1orytsvu","slide":5,"name":"takeaway-body","text":"v2 ist im gepoolten Holdout signifikant besser als die Paper-Baseline.","textPreview":"v2 ist im gepoolten Holdout signifikant besser als die Paper-Baseline.","textChars":70,"textLines":1,"bbox":[98,569,315,72]}
+{"kind":"shape","id":"sh/u9knih4b","slide":5,"bbox":[452,538,18,18]}
+{"kind":"textbox","id":"sh/judg7ads","slide":5,"name":"takeaway-title","text":"Kein Odds-Edge","textPreview":"Kein Odds-Edge","textChars":14,"textLines":1,"bbox":[488,529,315,34]}
+{"kind":"textbox","id":"sh/cfa9w3m9","slide":5,"name":"takeaway-body","text":"Bookmaker haben im Mittel 0.0036 RPS Vorteil; konservativ: kein belastbarer Markt-Vorsprung.","textPreview":"Bookmaker haben im Mittel 0.0036 RPS Vorteil; konservativ: kein belastbarer Markt-Vorsprung.","textChars":92,"textLines":1,"bbox":[488,569,315,72]}
+{"kind":"shape","id":"sh/1032lszq","slide":5,"bbox":[842,538,18,18]}
+{"kind":"textbox","id":"sh/udg7adsj","slide":5,"name":"takeaway-title","text":"Wissenschaftlich sauber","textPreview":"Wissenschaftlich sauber","textChars":23,"textLines":1,"bbox":[878,529,315,34]}
+{"kind":"textbox","id":"sh/nyd0z610","slide":5,"name":"takeaway-body","text":"Leak-freier Backtest plus CI ist wertvoller als ein zu starker Performance-Claim.","textPreview":"Leak-freier Backtest plus CI ist wertvoller als ein zu starker Performance-Claim.","textChars":81,"textLines":1,"bbox":[878,569,315,72]}
+{"kind":"textbox","id":"sh/rmhk3q5o","slide":5,"name":"footer-source","text":"Daten: multiseason_summary.csv und 16_multiseason_effect_ci.png","textPreview":"Daten: multiseason_summary.csv und 16_multiseason_effect_ci.png","textChars":63,"textLines":1,"bbox":[42,666,980,28]}
+{"kind":"textbox","id":"sh/y1kre1w7","slide":5,"name":"footer-number","text":"5","textPreview":"5","textChars":1,"textLines":1,"bbox":[1195,666,44,28]}
+{"kind":"notes","id":"nt/7zxmkw","slide":5,"text":"Die zweite Ergebnisfolie ist die ehrliche Einordnung gegen Buchmacher. Links in gruen sieht man v2 versus Bookmaker: positive Werte waeren gut fuer uns, negative Werte gut fuer die Buchmacher.\nGepoolt liegt die Differenz bei -0.0036 RPS, also leicht zugunsten der Buchmacher. Das Bootstrap-CI beruehrt Null knapp, aber wir sollten daraus keinesfalls einen Markt-Edge claimen.\nRechts sieht man dagegen v2 versus Paper-Baseline: dort ist der gepoolte Effekt klar positiv. Das ist die starke Botschaft.\nMein Fazit waere: Wir haben das Originalmodell signifikant verbessert und gleichzeitig gezeigt, dass ein fairer Vergleich mit Closing Odds extrem schwer ist. Genau das ist fuer probabilistisches Modellieren eigentlich ein gutes Ergebnis."}

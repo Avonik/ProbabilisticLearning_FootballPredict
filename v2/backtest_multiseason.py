@@ -71,6 +71,7 @@ FIRST_SEASON_LABEL = f"{UNDERSTAT_FIRST_YEAR}/{(UNDERSTAT_FIRST_YEAR + 1) % 100:
 OUTPUT_ROOT = Path("output")
 MAX_PARALLEL_SEASONS = 2
 PAPER_BASELINE_CACHE_VERSION = 1
+OUTCOME_LABELS = np.array(["home_win", "draw", "away_win"], dtype=object)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -100,36 +101,42 @@ def _scramble_xg(df: pd.DataFrame, seed: int) -> pd.DataFrame:
     return out
 
 
-def _per_match_rps(cmp: dict) -> tuple[np.ndarray, np.ndarray]:
+def _common_holdout_indices(cmp: dict, *, require_paper: bool) -> np.ndarray:
+    """Fair holdout rows where all required probability vectors are finite."""
+    pm = cmp["probs_model"]
+    pb = cmp["probs_bookmaker"]
+    n, cutoff = cmp["n"], cmp["cutoff"]
+    hold = np.arange(n) >= cutoff
+    fin = np.all(np.isfinite(pm), axis=1) & np.all(np.isfinite(pb), axis=1)
+    if require_paper:
+        pp = cmp["probs_paper"]
+        fin = fin & np.all(np.isfinite(pp), axis=1)
+    return np.where(hold & fin)[0]
+
+
+def _per_match_rps(cmp: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Per-Spiel-RPS (Modell, Buchmacher) auf dem fairen gemeinsamen Holdout
     (genau die Spiele, auf denen ``evaluate_season_walkforward`` aggregiert)."""
     pm = cmp["probs_model"]
     pb = cmp["probs_bookmaker"]
     out = cmp["outcomes"]
-    n, cutoff = cmp["n"], cmp["cutoff"]
-    hold = np.arange(n) >= cutoff
-    fin = np.all(np.isfinite(pm), axis=1) & np.all(np.isfinite(pb), axis=1)
-    common = hold & fin
-    rps_m = np.array([rps_one(pm[i], out[i]) for i in np.where(common)[0]])
-    rps_b = np.array([rps_one(pb[i], out[i]) for i in np.where(common)[0]])
-    return rps_m, rps_b
+    idx = _common_holdout_indices(cmp, require_paper=False)
+    rps_m = np.array([rps_one(pm[i], out[i]) for i in idx])
+    rps_b = np.array([rps_one(pb[i], out[i]) for i in idx])
+    return idx, rps_m, rps_b
 
 
-def _per_match_rps3(cmp: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _per_match_rps3(cmp: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Per-Spiel-RPS (Modell-v2, Paper-Baseline, Buchmacher) auf dem GEMEINSAMEN
     Holdout (alle drei endlich). Setzt voraus, dass ``cmp['probs_paper']`` da ist
     (via ``backtest.add_paper_baseline``)."""
     pm, pp, pb = cmp["probs_model"], cmp["probs_paper"], cmp["probs_bookmaker"]
     out = cmp["outcomes"]
-    n, cutoff = cmp["n"], cmp["cutoff"]
-    hold = np.arange(n) >= cutoff
-    fin = (np.all(np.isfinite(pm), axis=1) & np.all(np.isfinite(pp), axis=1)
-           & np.all(np.isfinite(pb), axis=1))
-    idx = np.where(hold & fin)[0]
+    idx = _common_holdout_indices(cmp, require_paper=True)
     rps_m = np.array([rps_one(pm[i], out[i]) for i in idx])
     rps_p = np.array([rps_one(pp[i], out[i]) for i in idx])
     rps_b = np.array([rps_one(pb[i], out[i]) for i in idx])
-    return rps_m, rps_p, rps_b
+    return idx, rps_m, rps_p, rps_b
 
 
 def _paired_stats(rps_model: np.ndarray, rps_book: np.ndarray,
@@ -337,14 +344,26 @@ def _run_season_backtest(df: pd.DataFrame, season: str, *,
             n_chains=n_chains, jitter_sd=bt.CHAIN_JITTER_SD,
             verbose=verbose,
         )
-        rps_m, rps_p, rps_b = _per_match_rps3(cmp)
+        idx, rps_m, rps_p, rps_b = _per_match_rps3(cmp)
     else:
-        rps_m, rps_b = _per_match_rps(cmp)
+        idx, rps_m, rps_b = _per_match_rps(cmp)
         rps_p = None
 
+    out = np.asarray(cmp["outcomes"], dtype=int)[idx]
+    probs_v2 = np.asarray(cmp["probs_model"], dtype=float)[idx]
+    probs_book = np.asarray(cmp["probs_bookmaker"], dtype=float)[idx]
     match_frame = pd.DataFrame({
         "season": season,
+        "season_game": idx + 1,
         "holdout_game": np.arange(1, len(rps_m) + 1),
+        "actual_result": OUTCOME_LABELS[out],
+        "actual_result_idx": out,
+        "p_home_v2": probs_v2[:, 0],
+        "p_draw_v2": probs_v2[:, 1],
+        "p_away_v2": probs_v2[:, 2],
+        "p_home_book": probs_book[:, 0],
+        "p_draw_book": probs_book[:, 1],
+        "p_away_book": probs_book[:, 2],
         "rps_v2": rps_m,
         "rps_book": rps_b,
         "d_book_v2": rps_b - rps_m,
