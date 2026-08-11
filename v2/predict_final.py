@@ -37,6 +37,8 @@ ANALYSIS_SEASON = "2025/26"
 
 # Muss zur Konfiguration in run.py passen
 USE_XG     = True
+USE_TEAM_HOME_ADVANTAGE = True
+TEAM_HOME_ADV_PRIOR_SD = 0.15
 N_CHAINS   = 4
 N_ITER     = 500_000
 TUNE_MODE  = "paper"
@@ -46,7 +48,8 @@ TUNE_MODE  = "paper"
 CACHE_DIR  = Path(__file__).resolve().parent / "cache_v2"
 CACHE      = CACHE_DIR / (
     f"mcmc_{ANALYSIS_SEASON.replace('/','_')}_{N_CHAINS}c_{N_ITER}i_"
-    f"{'xg' if USE_XG else 'goals'}.pkl"
+    f"{'xg' if USE_XG else 'goals'}"
+    f"{'_teamhome' if USE_TEAM_HOME_ADVANTAGE else ''}.pkl"
 )
 TUNE_CACHE = CACHE_DIR / f"tune_{TUNE_MODE}_{ANALYSIS_SEASON.replace('/','_')}_{'xg' if USE_XG else 'goals'}.pkl"
 # =====================
@@ -64,6 +67,10 @@ def load_samples(cache: Path, season: str) -> tuple:
     print(f"Lade Cache: {cache}")
     with open(cache, "rb") as f:
         samples = pickle.load(f)
+    if USE_TEAM_HOME_ADVANTAGE and "home_advantage" not in samples:
+        print("Der Cache enthält noch keine teamspezifischen Heimeffekte. "
+              "Bitte run.py mit der aktuellen Konfiguration neu ausführen.")
+        sys.exit(1)
 
     df = load_bundesliga(2024, 2026, fallback_synthetic=False, with_extras=True)
     df = extract_bookmaker_probs(df)
@@ -87,7 +94,9 @@ def load_samples(cache: Path, season: str) -> tuple:
         print(f"Verwende getunte Hyperparameter: tau={tau}, gamma={gamma}, eps={eps}")
 
     L = build_league(df_season, use_xg=USE_XG,
-                     tau=tau, gamma=gamma, epsilon=eps)
+                     tau=tau, gamma=gamma, epsilon=eps,
+                     use_team_home_advantage=USE_TEAM_HOME_ADVANTAGE,
+                     home_adv_prior_sd=TEAM_HOME_ADV_PRIOR_SD)
     return samples, L
 
 
@@ -106,19 +115,25 @@ def predict_match(samples, L, team1: str, team2: str, neutral: bool) -> dict:
     p1_list, pd_list, p2_list = [], [], []
     score_mat = np.zeros((MAX_GOALS + 1, MAX_GOALS + 1))
 
-    for sa, sd in zip(samples["attack"], samples["defense"]):
+    home_samples = samples.get("home_advantage")
+    for sample_i, (sa, sd) in enumerate(zip(samples["attack"], samples["defense"])):
         a1, d1 = float(sa[t1][-1]), float(sd[t1][-1])
         a2, d2 = float(sa[t2][-1]), float(sd[t2][-1])
+        home_adv = (float(home_samples[sample_i][t1])
+                    if home_samples is not None and not neutral else 0.0)
 
         p1, pd, p2 = predict_outcome_probs(
             a1, d1, a2, d2, c_x, c_y,
-            gamma=L.gamma, eps=L.epsilon,
+            gamma=L.gamma, eps=L.epsilon, home_advantage=home_adv,
         )
         p1_list.append(p1)
         pd_list.append(pd)
         p2_list.append(p2)
 
-        lam_x, lam_y = compute_lambdas(a1, d1, a2, d2, c_x, c_y, gamma=L.gamma)
+        lam_x, lam_y = compute_lambdas(
+            a1, d1, a2, d2, c_x, c_y,
+            gamma=L.gamma, home_advantage=home_adv,
+        )
         lam_avg_x = np.exp(c_x)
         lam_avg_y = np.exp(c_y)
         for x in range(MAX_GOALS + 1):

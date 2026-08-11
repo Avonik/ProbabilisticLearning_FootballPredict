@@ -48,7 +48,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import wilcoxon
 
-from data import load_bundesliga, extract_bookmaker_probs
+from data import load_bundesliga, extract_bookmaker_probs, sort_matches
 from xg import fit_xg_weights, add_xg_columns
 from real_xg import add_real_xg_columns, UNDERSTAT_FIRST_YEAR
 from mcmc import warmup_jit
@@ -70,7 +70,7 @@ BOOTSTRAP_SEED = 0
 FIRST_SEASON_LABEL = f"{UNDERSTAT_FIRST_YEAR}/{(UNDERSTAT_FIRST_YEAR + 1) % 100:02d}"  # "2014/15"
 OUTPUT_ROOT = Path("output")
 MAX_PARALLEL_SEASONS = 2
-PAPER_BASELINE_CACHE_VERSION = 1
+PAPER_BASELINE_CACHE_VERSION = 2
 OUTCOME_LABELS = np.array(["home_win", "draw", "away_win"], dtype=object)
 
 
@@ -175,8 +175,7 @@ def _season_tag(season: str) -> str:
 
 def _season_data_fingerprint(df: pd.DataFrame, season: str) -> str:
     cols = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]
-    sub = (df[df["Season"] == season]
-           .sort_values("Date").reset_index(drop=True))
+    sub = sort_matches(df[df["Season"] == season])
     payload_df = sub[cols].copy()
     payload_df["Date"] = pd.to_datetime(payload_df["Date"]).dt.strftime("%Y-%m-%d")
     payload = payload_df.to_csv(index=False).encode("utf-8")
@@ -285,6 +284,7 @@ def _add_cached_paper_baseline(comparison: dict, df: pd.DataFrame, season: str, 
         holdout_frac=holdout_frac, verbose=verbose,
         n_chains=n_chains, jitter_sd=jitter_sd,
         market_values=None, market_kappa=0.0, continuous_xg=False,
+        use_team_home_advantage=False,
     )
     probs_paper = wf["probs_model"]
     _save_paper_cache(path, config, probs_paper)
@@ -336,6 +336,8 @@ def _run_season_backtest(df: pd.DataFrame, season: str, *,
         holdout_frac=bt.HOLDOUT_FRAC, verbose=verbose,
         n_chains=n_chains, jitter_sd=bt.CHAIN_JITTER_SD,
         market_values=mv, market_kappa=mk,
+        use_team_home_advantage=bt.USE_TEAM_HOME_ADVANTAGE,
+        home_adv_prior_sd=bt.TEAM_HOME_ADV_PRIOR_SD,
     )
 
     if bt.INCLUDE_PAPER_BASELINE:
@@ -354,6 +356,14 @@ def _run_season_backtest(df: pd.DataFrame, season: str, *,
     probs_book = np.asarray(cmp["probs_bookmaker"], dtype=float)[idx]
     match_frame = pd.DataFrame({
         "season": season,
+        "team_home_advantage": bool(bt.USE_TEAM_HOME_ADVANTAGE),
+        "team_home_prior_sd": float(bt.TEAM_HOME_ADV_PRIOR_SD),
+        "match_id": np.asarray(cmp["match_ids"], dtype=object)[idx],
+        "date": pd.to_datetime(np.asarray(cmp["dates"])[idx]).strftime("%Y-%m-%d"),
+        "home_team": np.asarray(cmp["home_teams"], dtype=object)[idx],
+        "away_team": np.asarray(cmp["away_teams"], dtype=object)[idx],
+        "home_goals": np.asarray(cmp["home_goals"], dtype=int)[idx],
+        "away_goals": np.asarray(cmp["away_goals"], dtype=int)[idx],
         "season_game": idx + 1,
         "holdout_game": np.arange(1, len(rps_m) + 1),
         "actual_result": OUTCOME_LABELS[out],
@@ -665,6 +675,8 @@ def _write_visual_outputs(report_dir: Path,
 
     summary_rows = [{
         "comparison": "v2_vs_bookmaker",
+        "team_home_advantage": bool(bt.USE_TEAM_HOME_ADVANTAGE),
+        "team_home_prior_sd": float(bt.TEAM_HOME_ADV_PRIOR_SD),
         "n": stats["n"],
         "mean_delta_rps": stats["mean_diff"],
         "rel_pct": stats["rel_pct"],
@@ -676,6 +688,8 @@ def _write_visual_outputs(report_dir: Path,
     if have_paper and stats_vp is not None:
         summary_rows.append({
             "comparison": "v2_vs_paper",
+            "team_home_advantage": bool(bt.USE_TEAM_HOME_ADVANTAGE),
+            "team_home_prior_sd": float(bt.TEAM_HOME_ADV_PRIOR_SD),
             "n": stats_vp["n"],
             "mean_delta_rps": stats_vp["mean_diff"],
             "rel_pct": stats_vp["rel_pct"],

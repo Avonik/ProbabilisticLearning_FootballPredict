@@ -178,3 +178,41 @@ Augenhöhe mit Closing-Odds — noch kein nachgewiesener Vorsprung."**
 3. **φ-Sweep auf echtem xG** (φ∈{5,15,40}) → Default rechtfertigen/anpassen.
 4. **Konvergenz** (optional): R-hat < 1.05 via mehr Iterationen oder einem
    Team-Level-Block-Update im Sampler.
+
+---
+
+## 8. Teamspezifischer Heimvorteil und stabile Match-Identität (2026-08-11)
+
+### MatchID-Fix
+
+Jedes Spiel erhält jetzt eine kanonische ID aus
+`Season|Date|HomeTeam|AwayTeam`. Sortierungen verwenden zusätzlich
+`Date, HomeTeam, AwayTeam` stabil. Multi-Season-Ergebnisse speichern ID, Datum,
+Teams und Tore direkt. Das Quoten-Postprocessing rekonstruiert Spiele nicht
+mehr über potenziell identische Buchmacherwahrscheinlichkeiten, sondern nutzt
+einen validierten 1:1-Join auf `match_id` und bricht bei Abweichungen ab.
+
+### Teamspezifischer Heimvorteil
+
+Zusätzlich zum ligaweiten Effekt `c_x-c_y` besitzt jedes Team eine zentrierte
+Abweichung `h_i`:
+
+```
+log(lambda_home) += h_home / 2
+log(lambda_away) -= h_home / 2
+```
+
+Alle Teamparameter teilen den Shrinkage-Prior `h_i ~ N(0, 0.15²)`. Paarweise
+MCMC-Proposals (`h_i += z`, `h_j -= z`) halten `sum(h)=0` exakt, sodass die
+Teamwerte nicht mit dem globalen Heimvorteil konkurrieren. Der Effekt ist in
+Walk-Forward-Warm-Starts, Mehrketten-R-hat, Einzelspielvorhersagen und
+Replay-Simulationen integriert.
+
+| Flag | Bedeutung |
+|------|-----------|
+| `USE_TEAM_HOME_ADVANTAGE` | teamspezifischen Heimeffekt an-/abschalten |
+| `TEAM_HOME_ADV_PRIOR_SD` | Stärke der gemeinsamen partiellen Pooling-Regularisierung |
+
+Für die Ablation wird der Multi-Season-Lauf einmal mit aktivem und einmal mit
+deaktiviertem Flag auf identischen MatchIDs ausgeführt. Erst die gepaarte
+Out-of-sample-RPS-Differenz beantwortet, ob der Zusatzparameter nützt.

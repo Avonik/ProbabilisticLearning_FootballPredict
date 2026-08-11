@@ -96,10 +96,11 @@ def _dc_correction(x, y, lam_x, lam_y):
 
 
 @njit(cache=True, fastmath=True)
-def _compute_lambdas(a_h, d_h, a_a, d_a, c_x, c_y, gamma):
+def _compute_lambdas(a_h, d_h, a_a, d_a, c_x, c_y, gamma, home_advantage):
     delta = (a_h + d_h - a_a - d_a) * 0.5
-    log_lam_x = c_x + a_h - d_a - gamma * delta
-    log_lam_y = c_y + a_a - d_h + gamma * delta
+    half_home_adv = 0.5 * home_advantage
+    log_lam_x = c_x + a_h - d_a - gamma * delta + half_home_adv
+    log_lam_y = c_y + a_a - d_h + gamma * delta - half_home_adv
     return np.exp(log_lam_x), np.exp(log_lam_y)
 
 
@@ -118,7 +119,7 @@ def _gamma_loglik_lam(g, lam, phi):
 @njit(cache=True, fastmath=True)
 def _match_loglik(
     m,
-    attack_flat, defense_flat,
+    attack_flat, defense_flat, home_advantage,
     team_start, home_idx, away_idx,
     match_home_local, match_away_local,
     obs_x, obs_y,
@@ -141,7 +142,9 @@ def _match_loglik(
         lam_x = lam_x_avg
         lam_y = lam_y_avg
     else:
-        lam_x, lam_y = _compute_lambdas(a_h, d_h, a_a, d_a, c_x, c_y, gamma)
+        lam_x, lam_y = _compute_lambdas(
+            a_h, d_h, a_a, d_a, c_x, c_y, gamma, home_advantage[h],
+        )
 
     if continuous:
         # Kontinuierliches xG: Gamma-Messmodell, kein Trunc/Dixon-Coles.
@@ -182,7 +185,7 @@ def _initial_prior_logpdf(val, mu, sigma2):
 @njit(cache=True, fastmath=True)
 def _run_chunk(
     # State
-    attack_flat, defense_flat, delta,
+    attack_flat, defense_flat, home_advantage, delta,
     # League-Struktur (flach)
     team_start, team_matches_flat, strength_days,
     home_idx, away_idx, match_home_local, match_away_local,
@@ -190,6 +193,7 @@ def _run_chunk(
     # Hyperparameter
     c_x, c_y, gamma, epsilon, tau, sigma2,
     init_prior_mean,         # shape (n_teams,): Prior-Mittel der Initial-Stärke
+    use_team_home_advantage, home_adv_prior_var,
     max_k,
     continuous, phi,
     proposal_sd,
@@ -197,7 +201,7 @@ def _run_chunk(
     it_start, it_end,        # absolute iter range [it_start, it_end)
     burnin, thin,
     # Output-Buffer
-    sample_attack, sample_defense, sample_delta,
+    sample_attack, sample_defense, sample_home_advantage, sample_delta,
     sample_offset,           # erster freier Sample-Slot
 ):
     """
@@ -277,7 +281,7 @@ def _run_chunk(
 
                     # Likelihood (nur das betroffene Spiel)
                     old_ll = _match_loglik(
-                        m, attack_flat, defense_flat,
+                        m, attack_flat, defense_flat, home_advantage,
                         team_start, home_idx, away_idx,
                         match_home_local, match_away_local,
                         obs_x, obs_y, c_x, c_y, gamma,
@@ -289,7 +293,7 @@ def _run_chunk(
                     else:
                         defense_flat[gidx] = proposed
                     new_ll = _match_loglik(
-                        m, attack_flat, defense_flat,
+                        m, attack_flat, defense_flat, home_advantage,
                         team_start, home_idx, away_idx,
                         match_home_local, match_away_local,
                         obs_x, obs_y, c_x, c_y, gamma,
@@ -308,7 +312,73 @@ def _run_chunk(
                             defense_flat[gidx] = current
                     propose_count += 1
 
-        # === 2) Bernoulli-Indikatoren updaten ==========================
+        # === 2) Teamspezifischen Heimvorteil updaten ===================
+        # Paar-Proposals erhalten sum(home_advantage)=0 exakt. Dadurch ist
+        # der Liga-Heimvorteil weiter allein in c_x-c_y identifiziert und die
+        # Teamparameter sind reine Abweichungen davon.
+        if use_team_home_advantage == 1 and n_teams > 1:
+            home_order = np.random.permutation(n_teams)
+            for oi in range(n_teams):
+                team_i = home_order[oi]
+                team_j = np.random.randint(0, n_teams - 1)
+                if team_j >= team_i:
+                    team_j += 1
+
+                current_i = home_advantage[team_i]
+                current_j = home_advantage[team_j]
+                shift = np.random.normal(0.0, proposal_sd)
+                proposed_i = current_i + shift
+                proposed_j = current_j - shift
+
+                log_alpha = 0.0
+                log_alpha += _initial_prior_logpdf(proposed_i, 0.0, home_adv_prior_var)
+                log_alpha += _initial_prior_logpdf(proposed_j, 0.0, home_adv_prior_var)
+                log_alpha -= _initial_prior_logpdf(current_i, 0.0, home_adv_prior_var)
+                log_alpha -= _initial_prior_logpdf(current_j, 0.0, home_adv_prior_var)
+
+                old_ll = 0.0
+                for pair_pos in range(2):
+                    team = team_i if pair_pos == 0 else team_j
+                    for gidx in range(team_start[team], team_start[team + 1]):
+                        m = team_matches_flat[gidx]
+                        if home_idx[m] != team:
+                            continue
+                        old_ll += _match_loglik(
+                            m, attack_flat, defense_flat, home_advantage,
+                            team_start, home_idx, away_idx,
+                            match_home_local, match_away_local,
+                            obs_x, obs_y, c_x, c_y, gamma,
+                            delta[m], lam_x_avg, lam_y_avg, max_k,
+                            continuous, phi,
+                        )
+
+                home_advantage[team_i] = proposed_i
+                home_advantage[team_j] = proposed_j
+                new_ll = 0.0
+                for pair_pos in range(2):
+                    team = team_i if pair_pos == 0 else team_j
+                    for gidx in range(team_start[team], team_start[team + 1]):
+                        m = team_matches_flat[gidx]
+                        if home_idx[m] != team:
+                            continue
+                        new_ll += _match_loglik(
+                            m, attack_flat, defense_flat, home_advantage,
+                            team_start, home_idx, away_idx,
+                            match_home_local, match_away_local,
+                            obs_x, obs_y, c_x, c_y, gamma,
+                            delta[m], lam_x_avg, lam_y_avg, max_k,
+                            continuous, phi,
+                        )
+                log_alpha += new_ll - old_ll
+
+                if np.log(np.random.random()) < log_alpha:
+                    accept_count += 1
+                else:
+                    home_advantage[team_i] = current_i
+                    home_advantage[team_j] = current_j
+                propose_count += 1
+
+        # === 3) Bernoulli-Indikatoren updaten ==========================
         m_order = np.random.permutation(n_matches)
         for mi in range(n_matches):
             m = m_order[mi]
@@ -316,7 +386,7 @@ def _run_chunk(
             proposed = 1 - current
 
             old_ll = _match_loglik(
-                m, attack_flat, defense_flat,
+                m, attack_flat, defense_flat, home_advantage,
                 team_start, home_idx, away_idx,
                 match_home_local, match_away_local,
                 obs_x, obs_y, c_x, c_y, gamma,
@@ -324,7 +394,7 @@ def _run_chunk(
                 continuous, phi,
             )
             new_ll = _match_loglik(
-                m, attack_flat, defense_flat,
+                m, attack_flat, defense_flat, home_advantage,
                 team_start, home_idx, away_idx,
                 match_home_local, match_away_local,
                 obs_x, obs_y, c_x, c_y, gamma,
@@ -338,7 +408,7 @@ def _run_chunk(
             if np.log(np.random.random()) < log_alpha:
                 delta[m] = proposed
 
-        # === 3) Globalen Level-Drift entfernen =========================
+        # === 4) Globalen Level-Drift entfernen =========================
         # Nicht-identifizierbare Richtung a+=k, d+=k
         s = 0.0
         n_total = attack_flat.shape[0]
@@ -349,11 +419,13 @@ def _run_chunk(
             attack_flat[i] -= global_mean
             defense_flat[i] -= global_mean
 
-        # === 4) Snapshot speichern =====================================
+        # === 5) Snapshot speichern =====================================
         if it >= burnin and (it - burnin) % thin == 0:
             for i in range(n_total):
                 sample_attack[n_saved, i] = attack_flat[i]
                 sample_defense[n_saved, i] = defense_flat[i]
+            for team in range(n_teams):
+                sample_home_advantage[n_saved, team] = home_advantage[team]
             for m in range(n_matches):
                 sample_delta[n_saved, m] = delta[m]
             n_saved += 1
@@ -365,11 +437,11 @@ def _run_chunk(
 # Public API
 # ─────────────────────────────────────────────────────────────────────
 
-def _flat_samples_to_dicts(L, sample_attack, sample_defense, sample_delta,
-                           n_saved):
+def _flat_samples_to_dicts(L, sample_attack, sample_defense,
+                           sample_home_advantage, sample_delta, n_saved):
     """Konvertiert flache Sample-Arrays in das v1-Dict-Format."""
     n_teams = L.n_teams
-    out_a, out_d, out_delta = [], [], []
+    out_a, out_d, out_home, out_delta = [], [], [], []
     for s in range(n_saved):
         ad: dict = {}
         dd: dict = {}
@@ -380,8 +452,9 @@ def _flat_samples_to_dicts(L, sample_attack, sample_defense, sample_delta,
             dd[t] = sample_defense[s, start:end].copy()
         out_a.append(ad)
         out_d.append(dd)
+        out_home.append(sample_home_advantage[s].copy())
         out_delta.append(sample_delta[s].copy())
-    return out_a, out_d, out_delta
+    return out_a, out_d, out_home, out_delta
 
 
 def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
@@ -390,7 +463,8 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
              progress_queue=None, chunk: int = 200,
              init_attack: np.ndarray | None = None,
              init_defense: np.ndarray | None = None,
-             init_delta: np.ndarray | None = None):
+             init_delta: np.ndarray | None = None,
+             init_home_advantage: np.ndarray | None = None):
     """
     Numba-MCMC. Identisches Schnittstellen-Format zu v1.
 
@@ -416,6 +490,7 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
     n_total = int(L.team_start[-1])
     attack_flat = np.zeros(n_total, dtype=np.float64)
     defense_flat = np.zeros(n_total, dtype=np.float64)
+    home_advantage = np.zeros(L.n_teams, dtype=np.float64)
     delta = np.zeros(L.n_matches, dtype=np.int64)
     if init_attack is not None:
         attack_flat[:] = np.asarray(init_attack, dtype=np.float64)
@@ -423,6 +498,9 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
         defense_flat[:] = np.asarray(init_defense, dtype=np.float64)
     if init_delta is not None:
         delta[:] = np.asarray(init_delta, dtype=np.int64)
+    if init_home_advantage is not None and L.use_team_home_advantage:
+        home_advantage[:] = np.asarray(init_home_advantage, dtype=np.float64)
+        home_advantage -= home_advantage.mean()
 
     # Informativer Prior (Marktwert-Baseline); None ⇒ Nullvektor ⇒ 0-Prior.
     if getattr(L, "init_prior_mean", None) is not None:
@@ -435,6 +513,7 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
     n_samples_target = (n_post + thin - 1) // thin
     sample_attack = np.zeros((n_samples_target, n_total))
     sample_defense = np.zeros((n_samples_target, n_total))
+    sample_home_advantage = np.zeros((n_samples_target, L.n_teams))
     sample_delta = np.zeros((n_samples_target, L.n_matches), dtype=np.int64)
 
     accept_count = 0
@@ -449,19 +528,20 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
     for it_start in iterator:
         it_end = min(it_start + chunk, n_iter)
         ac, pc, sample_offset = _run_chunk(
-            attack_flat, defense_flat, delta,
+            attack_flat, defense_flat, home_advantage, delta,
             L.team_start, L.team_matches_flat, L.strength_days,
             L.home_idx, L.away_idx,
             L.match_home_local, L.match_away_local,
             L.obs_x, L.obs_y,
             L.c_x, L.c_y, L.gamma, L.epsilon, L.tau, PRIOR_VAR,
             init_prior_mean,
+            int(L.use_team_home_advantage), L.home_adv_prior_sd ** 2,
             MAX_GOALS,
             int(L.continuous_obs), L.phi,
             proposal_sd,
             it_start, it_end,
             burnin, thin,
-            sample_attack, sample_defense, sample_delta,
+            sample_attack, sample_defense, sample_home_advantage, sample_delta,
             sample_offset,
         )
         accept_count += ac
@@ -470,13 +550,15 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
         if progress_queue is not None:
             progress_queue.put(it_end - it_start)
 
-    a_dicts, d_dicts, delta_list = _flat_samples_to_dicts(
-        L, sample_attack, sample_defense, sample_delta, sample_offset,
+    a_dicts, d_dicts, home_list, delta_list = _flat_samples_to_dicts(
+        L, sample_attack, sample_defense, sample_home_advantage,
+        sample_delta, sample_offset,
     )
 
     return {
         "attack": a_dicts,
         "defense": d_dicts,
+        "home_advantage": home_list,
         "delta": delta_list,
         "acceptance": float(accept_count) / max(1, propose_count),
     }
@@ -499,6 +581,14 @@ def posterior_means(samples) -> tuple[dict, dict, np.ndarray]:
     return mean_attack, mean_defense, p_outlier
 
 
+def posterior_home_advantage(samples) -> np.ndarray:
+    """Posterior mean of the centered team-specific home effects."""
+    values = samples.get("home_advantage")
+    if not values:
+        return np.array([], dtype=np.float64)
+    return np.stack(values).mean(axis=0)
+
+
 def warmup_jit():
     """
     Triggert die JIT-Kompilation aller @njit-Funktionen mit Dummy-Eingaben.
@@ -509,6 +599,7 @@ def warmup_jit():
     # Minimaler Dummy-State: 2 Teams, 1 Spiel
     attack_flat = np.zeros(2, dtype=np.float64)
     defense_flat = np.zeros(2, dtype=np.float64)
+    home_advantage = np.zeros(2, dtype=np.float64)
     delta = np.zeros(1, dtype=np.int64)
     team_start = np.array([0, 1, 2], dtype=np.int64)
     team_matches_flat = np.array([0, 0], dtype=np.int64)
@@ -523,25 +614,26 @@ def warmup_jit():
     obs_y_f = np.array([0.4], dtype=np.float64)
     sa = np.zeros((1, 2))
     sd = np.zeros((1, 2))
+    sh = np.zeros((1, 2))
     sdt = np.zeros((1, 1), dtype=np.int64)
     ipm = np.zeros(2, dtype=np.float64)   # init_prior_mean: 2 Dummy-Teams
     # Beide Branch-Spezialisierungen kompilieren: diskret (int64-obs,
     # continuous=0) und kontinuierlich (float64-obs, continuous=1).
     _run_chunk(
-        attack_flat, defense_flat, delta,
+        attack_flat, defense_flat, home_advantage, delta,
         team_start, team_matches_flat, strength_days,
         home_idx, away_idx, match_home_local, match_away_local,
         obs_x, obs_y,
         0.5, 0.1, 0.1, 0.2, 100.0, 1.0 / 37.0,
-        ipm,
-        5, 0, 5.0, 0.05, 0, 1, 0, 1, sa, sd, sdt, 0,
+        ipm, 1, 0.15 ** 2,
+        5, 0, 5.0, 0.05, 0, 1, 0, 1, sa, sd, sh, sdt, 0,
     )
     _run_chunk(
-        attack_flat, defense_flat, delta,
+        attack_flat, defense_flat, home_advantage, delta,
         team_start, team_matches_flat, strength_days,
         home_idx, away_idx, match_home_local, match_away_local,
         obs_x_f, obs_y_f,
         0.5, 0.1, 0.1, 0.2, 100.0, 1.0 / 37.0,
-        ipm,
-        5, 1, 5.0, 0.05, 0, 1, 0, 1, sa, sd, sdt, 0,
+        ipm, 1, 0.15 ** 2,
+        5, 1, 5.0, 0.05, 0, 1, 0, 1, sa, sd, sh, sdt, 0,
     )

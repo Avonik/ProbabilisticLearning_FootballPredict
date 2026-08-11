@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from model import predict_outcome_probs, MAX_GOALS
+from data import sort_matches
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -80,14 +81,18 @@ def predict_match_from_samples(samples, L, home_team: str, away_team: str,
     h = L.teams.index(home_team)
     a = L.teams.index(away_team)
     p_h_list, p_d_list, p_a_list = [], [], []
-    for sa, sd in zip(samples["attack"], samples["defense"]):
+    home_samples = samples.get("home_advantage")
+    for sample_i, (sa, sd) in enumerate(zip(samples["attack"], samples["defense"])):
         a_h = float(sa[h][-1] if last_local else sa[h].mean())
         d_h = float(sd[h][-1] if last_local else sd[h].mean())
         a_a = float(sa[a][-1] if last_local else sa[a].mean())
         d_a = float(sd[a][-1] if last_local else sd[a].mean())
+        home_adv = (float(home_samples[sample_i][h])
+                    if home_samples is not None else 0.0)
         p_h, p_d, p_a = predict_outcome_probs(
             a_h, d_h, a_a, d_a, L.c_x, L.c_y,
             gamma=L.gamma, eps=L.epsilon, max_k=MAX_GOALS,
+            home_advantage=home_adv,
         )
         p_h_list.append(p_h)
         p_d_list.append(p_d)
@@ -101,14 +106,18 @@ def predict_match_at_local(samples, L, home_team: str, away_team: str,
     h = L.teams.index(home_team)
     a = L.teams.index(away_team)
     p_h_list, p_d_list, p_a_list = [], [], []
-    for sa, sd in zip(samples["attack"], samples["defense"]):
+    home_samples = samples.get("home_advantage")
+    for sample_i, (sa, sd) in enumerate(zip(samples["attack"], samples["defense"])):
         a_h = float(sa[h][home_local])
         d_h = float(sd[h][home_local])
         a_a = float(sa[a][away_local])
         d_a = float(sd[a][away_local])
+        home_adv = (float(home_samples[sample_i][h])
+                    if home_samples is not None else 0.0)
         p_h, p_d, p_a = predict_outcome_probs(
             a_h, d_h, a_a, d_a, L.c_x, L.c_y,
             gamma=L.gamma, eps=L.epsilon, max_k=MAX_GOALS,
+            home_advantage=home_adv,
         )
         p_h_list.append(p_h)
         p_d_list.append(p_d)
@@ -165,7 +174,7 @@ def evaluate_season(samples, L, df_season: pd.DataFrame,
 
     Returns: dict mit Metriken sowie ``probs_pred`` und ``outcomes``.
     """
-    df = df_season.sort_values("Date").reset_index(drop=True)
+    df = sort_matches(df_season)
     n = len(df)
     cutoff = int(n * (1.0 - holdout_frac))
 
@@ -239,7 +248,7 @@ def compare_to_bookmaker(samples, L, df_season: pd.DataFrame,
     Returns ein dict mit Schlüsseln 'model', 'bookmaker', 'uniform', 'empirical',
     jeweils mit Metrics-dict.
     """
-    df = df_season.sort_values("Date").reset_index(drop=True)
+    df = sort_matches(df_season)
     n = len(df)
     cutoff = int(n * (1.0 - holdout_frac))
 

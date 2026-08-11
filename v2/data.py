@@ -38,6 +38,51 @@ BASE_URL = "https://www.football-data.co.uk/mmz4281"
 # Frühere Anfragen führen zu 404 — wir überspringen sie still.
 FIRST_AVAILABLE_YEAR = 1993
 
+MATCH_ID_COL = "MatchID"
+MATCH_SORT_COLS = ["Date", "HomeTeam", "AwayTeam"]
+
+
+def add_match_ids(df: pd.DataFrame, *, season_col: str = "Season",
+                  validate_unique: bool = True) -> pd.DataFrame:
+    """Add a deterministic identifier for each league match.
+
+    Positional season indices are unsafe because several matches share the
+    same date and pandas does not promise a stable order for the default sort.
+    The natural key (season, date, home team, away team) is stable across the
+    model, cached raw data and post-processing runs.
+    """
+    required = {season_col, "Date", "HomeTeam", "AwayTeam"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError("Cannot build MatchID; missing columns: " + ", ".join(missing))
+
+    out = df.copy()
+    dates = pd.to_datetime(out["Date"], errors="coerce")
+    if dates.isna().any():
+        raise ValueError("Cannot build MatchID with missing or invalid dates.")
+    seasons = out[season_col].astype(str).str.strip()
+    home = out["HomeTeam"].astype(str).str.strip()
+    away = out["AwayTeam"].astype(str).str.strip()
+    out[MATCH_ID_COL] = (
+        seasons + "|" + dates.dt.strftime("%Y-%m-%d") + "|" + home + "|" + away
+    )
+    if validate_unique and out[MATCH_ID_COL].duplicated().any():
+        duplicates = out.loc[out[MATCH_ID_COL].duplicated(False), MATCH_ID_COL].unique()
+        preview = ", ".join(map(str, duplicates[:3]))
+        raise ValueError(f"MatchID is not unique ({len(duplicates)} duplicate keys): {preview}")
+    return out
+
+
+def sort_matches(df: pd.DataFrame, *, add_ids: bool = True,
+                 season_col: str = "Season") -> pd.DataFrame:
+    """Return matches in one canonical, deterministic order."""
+    out = df.copy()
+    out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
+    out = out.sort_values(MATCH_SORT_COLS, kind="stable").reset_index(drop=True)
+    if add_ids:
+        out = add_match_ids(out, season_col=season_col)
+    return out
+
 # Basisspalten — auf jeden Fall behalten
 _BASE_COLS = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR"]
 
@@ -218,8 +263,7 @@ def load_bundesliga(start_year: int = 1993, end_year: int = 2026,
     if not all_dfs:
         raise RuntimeError("Keine Daten geladen!")
 
-    result = pd.concat(all_dfs, ignore_index=True)
-    result = result.sort_values("Date").reset_index(drop=True)
+    result = sort_matches(pd.concat(all_dfs, ignore_index=True))
     extra = ""
     if n_skipped:
         extra += f", {n_skipped} übersprungen"

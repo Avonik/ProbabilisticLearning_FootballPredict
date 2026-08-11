@@ -100,12 +100,14 @@ def run_mcmc_parallel(L, n_chains: int = 4, n_iter_per_chain: int = 5000,
     combined: dict = {
         "attack": [],
         "defense": [],
+        "home_advantage": [],
         "delta": [],
         "chains": chains,
     }
     for r in chains:
         combined["attack"].extend(r["attack"])
         combined["defense"].extend(r["defense"])
+        combined["home_advantage"].extend(r["home_advantage"])
         combined["delta"].extend(r["delta"])
     combined["acceptance"] = float(np.mean([r["acceptance"] for r in chains]))
 
@@ -114,6 +116,12 @@ def run_mcmc_parallel(L, n_chains: int = 4, n_iter_per_chain: int = 5000,
         for key in ("attack", "defense"):
             series = [
                 np.array([s[team].mean() for s in r[key]])
+                for r in chains
+            ]
+            rhat_values.append(gelman_rubin(series))
+        if L.use_team_home_advantage:
+            series = [
+                np.array([sample[team] for sample in r["home_advantage"]])
                 for r in chains
             ]
             rhat_values.append(gelman_rubin(series))

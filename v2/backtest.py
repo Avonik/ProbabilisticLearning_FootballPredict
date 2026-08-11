@@ -49,11 +49,13 @@ except (AttributeError, OSError):
 import numpy as np
 import pandas as pd
 
-from data import load_bundesliga, extract_bookmaker_probs
+from data import load_bundesliga, extract_bookmaker_probs, sort_matches, MATCH_ID_COL
 from xg import fit_xg_weights, add_xg_columns
 from model import (build_league, predict_outcome_probs, MAX_GOALS,
-                   DEFAULT_TAU, DEFAULT_GAMMA, DEFAULT_EPSILON)
-from mcmc import run_mcmc, posterior_means, warmup_jit
+                   DEFAULT_TAU, DEFAULT_GAMMA, DEFAULT_EPSILON,
+                   DEFAULT_HOME_ADV_PRIOR_SD)
+from mcmc import (run_mcmc, posterior_means, posterior_home_advantage,
+                  warmup_jit)
 from parallel import gelman_rubin
 from evaluation import (
     bookmaker_probs_from_df, uniform_baseline, empirical_baseline,
@@ -78,6 +80,12 @@ HOLDOUT_FRAC    = 0.3        # letzte 30 % der Saison (wie zuvor)
 # Stärken-Updates ⇒ weniger Hedging. Braucht USE_XG=True.
 USE_CONTINUOUS_XG = True
 PHI               = 5.0
+
+# Team-specific deviation from the league-wide home advantage.  All team
+# effects share a centered N(0, sd²) prior and therefore partially pool toward
+# zero.  The sum-to-zero constraint is preserved by pairwise MCMC proposals.
+USE_TEAM_HOME_ADVANTAGE = True
+TEAM_HOME_ADV_PRIOR_SD = DEFAULT_HOME_ADV_PRIOR_SD
 
 # Echtes Understat-xG (ab 2014/15) statt Schuss-Proxy?  → real_xg.py holt es
 # via soccerdata (gecached) und überschreibt xG_home/xG_away wo verfügbar;
@@ -204,16 +212,34 @@ def _flat_init(L, strengths_by_name: dict[str, tuple[float, float]]
     return a, d
 
 
+def _home_advantage_by_name(samples, L) -> dict[str, float]:
+    means = posterior_home_advantage(samples)
+    if len(means) == 0:
+        return {team: 0.0 for team in L.teams}
+    return {team: float(means[t]) for t, team in enumerate(L.teams)}
+
+
+def _home_adv_init(L, values_by_name: dict[str, float] | None) -> np.ndarray:
+    values = np.array(
+        [0.0 if values_by_name is None else values_by_name.get(team, 0.0)
+         for team in L.teams],
+        dtype=np.float64,
+    )
+    values -= values.mean()
+    return values
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Multi-Chain-Hilfen (Worker muss top-level sein → picklebar für den Pool)
 # ─────────────────────────────────────────────────────────────────────
 def _chain_worker(args):
     """Fittet EINE MCMC-Kette (läuft im Worker-Prozess)."""
-    (L, n_iter, burnin, thin, proposal_sd, seed, init_a, init_d) = args
+    (L, n_iter, burnin, thin, proposal_sd, seed, init_a, init_d, init_h) = args
     return run_mcmc(
         L, n_iter=n_iter, burnin=burnin, thin=thin,
         proposal_sd=proposal_sd, seed=seed, verbose=False,
         init_attack=init_a, init_defense=init_d,
+        init_home_advantage=init_h,
     )
 
 
@@ -227,6 +253,13 @@ def _compute_rhat(chains: list, n_teams: int) -> float:
     for team in range(n_teams):
         for key in ("attack", "defense"):
             series = [np.array([s[team].mean() for s in r[key]]) for r in chains]
+            if min(len(c) for c in series) >= 2:
+                vals.append(gelman_rubin(series))
+        if chains[0].get("home_advantage"):
+            series = [
+                np.array([sample[team] for sample in r["home_advantage"]])
+                for r in chains
+            ]
             if min(len(c) for c in series) >= 2:
                 vals.append(gelman_rubin(series))
     return float(np.max(vals)) if vals else float("nan")
@@ -249,6 +282,8 @@ def walkforward_predictions(
     n_chains: int = 1, jitter_sd: float = 0.1,
     continuous_xg: bool = USE_CONTINUOUS_XG, phi: float = PHI,
     market_values: dict | None = None, market_kappa: float = 0.0,
+    use_team_home_advantage: bool = USE_TEAM_HOME_ADVANTAGE,
+    home_adv_prior_sd: float = TEAM_HOME_ADV_PRIOR_SD,
 ) -> dict:
     """
     Liefert out-of-sample Modell-Wahrscheinlichkeiten für die Holdout-Spiele
@@ -265,8 +300,7 @@ def walkforward_predictions(
         df_season          — sortierter Saison-DataFrame (reset index)
         rhat_max           — max R-hat über alle Refits (NaN bei n_chains=1)
     """
-    df_season = (df_full[df_full["Season"] == season]
-                 .sort_values("Date").reset_index(drop=True))
+    df_season = sort_matches(df_full[df_full["Season"] == season])
     n = len(df_season)
     if n == 0:
         raise ValueError(f"Saison '{season}' nicht in den Daten.")
@@ -287,9 +321,13 @@ def walkforward_predictions(
         else:
             print(f"  Beobachtungsmodell: {'gerundetes xG' if use_xg else 'tatsächliche Tore'} "
                   f"(Trunc-Poisson + Dixon-Coles)")
+        print("  Teamspezifischer Heimvorteil: " +
+              (f"AN (Prior-SD={home_adv_prior_sd:g})"
+               if use_team_home_advantage else "AUS"))
 
     probs_model = np.full((n, 3), np.nan)
     warm: dict[str, tuple[float, float]] | None = None
+    warm_home: dict[str, float] | None = None
     rhat_max = float("nan")
     rng = np.random.default_rng(seed)
     t0 = time.time()
@@ -306,16 +344,20 @@ def walkforward_predictions(
             L = build_league(df_prefix, use_xg=use_xg,
                              tau=tau, gamma=gamma, epsilon=eps,
                              continuous_xg=continuous_xg, phi=phi,
-                             team_values=market_values, market_kappa=market_kappa)
+                             team_values=market_values, market_kappa=market_kappa,
+                             use_team_home_advantage=use_team_home_advantage,
+                             home_adv_prior_sd=home_adv_prior_sd)
             n_total = int(L.team_start[-1])
 
             # Warm-Start-Basis (zuletzt bekannte Stärken) + Iterationsbudget
             if warm is None:
                 base_a = np.zeros(n_total)
                 base_d = np.zeros(n_total)
+                base_h = np.zeros(L.n_teams)
                 n_iter, burnin = base_iter, base_burnin
             else:
                 base_a, base_d = _flat_init(L, warm)
+                base_h = _home_adv_init(L, warm_home)
                 n_iter, burnin = warm_iter, warm_burnin
 
             rhat_str = ""
@@ -323,10 +365,12 @@ def walkforward_predictions(
                 # ── Eine Kette (Warm-Start ohne Jitter) ──────────────────
                 ia = None if warm is None else base_a
                 id_ = None if warm is None else base_d
+                ih = None if warm is None else base_h
                 samples = run_mcmc(
                     L, n_iter=n_iter, burnin=burnin, thin=thin,
                     proposal_sd=proposal_sd, seed=seed + di, verbose=False,
                     init_attack=ia, init_defense=id_,
+                    init_home_advantage=ih,
                 )
                 acc = samples["acceptance"]
             else:
@@ -335,13 +379,17 @@ def walkforward_predictions(
                 for ci in range(n_chains):
                     ia = base_a + rng.normal(0.0, jitter_sd, n_total)
                     id_ = base_d + rng.normal(0.0, jitter_sd, n_total)
+                    ih = base_h + rng.normal(0.0, jitter_sd, L.n_teams)
+                    ih -= ih.mean()
                     args.append((L, n_iter, burnin, thin, proposal_sd,
-                                 seed + di * 1000 + ci, ia, id_))
+                                 seed + di * 1000 + ci, ia, id_, ih))
                 chains = list(executor.map(_chain_worker, args))
-                samples = {"attack": [], "defense": [], "delta": []}
+                samples = {"attack": [], "defense": [],
+                           "home_advantage": [], "delta": []}
                 for r in chains:
                     samples["attack"].extend(r["attack"])
                     samples["defense"].extend(r["defense"])
+                    samples["home_advantage"].extend(r["home_advantage"])
                     samples["delta"].extend(r["delta"])
                 acc = float(np.mean([r["acceptance"] for r in chains]))
                 rh = _compute_rhat(chains, L.n_teams)
@@ -350,6 +398,7 @@ def walkforward_predictions(
                     rhat_str = f", R̂={rh:.3f}"
 
             strengths = _last_strength_by_name(samples, L)
+            home_advantages = _home_advantage_by_name(samples, L)
 
             # Spiele dieses Datums vorhersagen (nur Vergangenheit ist eingeflossen)
             games = df_season[df_season["Date"] == d]
@@ -359,13 +408,16 @@ def walkforward_predictions(
                     continue
                 a_h, d_h = strengths[h]
                 a_a, d_a = strengths[a]
+                home_adv = home_advantages.get(h, 0.0)
                 p_h, p_d, p_a = predict_outcome_probs(
                     a_h, d_h, a_a, d_a, L.c_x, L.c_y,
                     gamma=gamma, eps=eps, max_k=MAX_GOALS,
+                    home_advantage=home_adv,
                 )
                 probs_model[row_i] = (p_h, p_d, p_a)
 
             warm = strengths   # Warm-Start für den nächsten Spieltag
+            warm_home = home_advantages
 
             if verbose:
                 done = di + 1
@@ -382,6 +434,7 @@ def walkforward_predictions(
         "n": n,
         "df_season": df_season,
         "rhat_max": rhat_max,
+        "home_advantages": warm_home or {},
     }
 
 
@@ -433,6 +486,12 @@ def evaluate_season_walkforward(
         "probs_model":     probs_model,
         "probs_bookmaker": probs_bm,
         "outcomes":        outcomes,
+        "match_ids":       df_season[MATCH_ID_COL].astype(str).to_numpy(),
+        "dates":           pd.to_datetime(df_season["Date"]).to_numpy(),
+        "home_teams":      df_season["HomeTeam"].astype(str).to_numpy(),
+        "away_teams":      df_season["AwayTeam"].astype(str).to_numpy(),
+        "home_goals":      df_season["FTHG"].to_numpy(dtype=int),
+        "away_goals":      df_season["FTAG"].to_numpy(dtype=int),
         "cutoff":          cutoff,
         "n":               n,
         "n_common":        int(common.sum()),
@@ -461,6 +520,7 @@ def add_paper_baseline(comparison: dict, df_full: pd.DataFrame, season: str, *,
         holdout_frac=holdout_frac, verbose=verbose,
         n_chains=n_chains, jitter_sd=jitter_sd,
         market_values=None, market_kappa=0.0, continuous_xg=False,
+        use_team_home_advantage=False,
     )
     probs_paper = wf["probs_model"]
     out = comparison["outcomes"]

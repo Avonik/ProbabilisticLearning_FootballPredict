@@ -20,6 +20,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from data import MATCH_ID_COL, sort_matches
 from scipy.stats import wilcoxon
 
 
@@ -137,7 +139,8 @@ def _read_season_raw(season: str) -> pd.DataFrame:
     for col in df.columns:
         if col not in {"Div", "Date", "Time", "HomeTeam", "AwayTeam", "FTR", "HTR"}:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df.sort_values("Date").reset_index(drop=True)
+    df["Season"] = str(season)
+    return sort_matches(df)
 
 
 def _load_match_data(run_dir: Path) -> pd.DataFrame:
@@ -145,6 +148,7 @@ def _load_match_data(run_dir: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     required = {
         "season",
+        "match_id",
         "season_game",
         "actual_result_idx",
         "p_home_v2",
@@ -182,51 +186,68 @@ def _closing_probs_by_priority(raw: pd.DataFrame) -> np.ndarray:
     return probs
 
 
-def _match_raw_rows_by_stored_closing(
-    sub: pd.DataFrame, raw: pd.DataFrame
-) -> tuple[list[pd.Series], list[int]]:
-    raw_probs = _closing_probs_by_priority(raw)
-    stored = sub[["p_home_book", "p_draw_book", "p_away_book"]].to_numpy(dtype=float)
-    distances = np.max(np.abs(raw_probs[:, None, :] - stored[None, :, :]), axis=2)
-    raw_rows: list[pd.Series] = []
-    raw_indices: list[int] = []
-    used: set[int] = set()
-    for j in range(len(sub)):
-        order = np.argsort(distances[:, j])
-        best = None
-        for raw_i in order:
-            if raw_i not in used and np.isfinite(distances[raw_i, j]):
-                best = int(raw_i)
-                break
-        if best is None or distances[best, j] > 1e-9:
-            raise ValueError(
-                "Could not match saved bookmaker probabilities back to raw odds "
-                f"for season {sub['season'].iloc[0]} row {j}; "
-                f"best distance={distances[best, j] if best is not None else np.nan}"
-            )
-        used.add(best)
-        raw_rows.append(raw.iloc[best])
-        raw_indices.append(best)
-    return raw_rows, raw_indices
-
-
 def _join_raw_matches(match_df: pd.DataFrame) -> pd.DataFrame:
     chunks = []
     for season, sub in match_df.groupby("season", sort=False):
         raw = _read_season_raw(str(season))
-        raw_rows, raw_indices = _match_raw_rows_by_stored_closing(
-            sub.reset_index(drop=True), raw
+        raw = raw.reset_index(names="raw_index")
+        raw_cols = [MATCH_ID_COL, "raw_index", "Date", "HomeTeam", "AwayTeam",
+                    "FTHG", "FTAG"] + [c for c in RAW_ODDS_COLUMNS if c in raw]
+        raw_sub = raw[raw_cols].rename(columns={
+            MATCH_ID_COL: "match_id",
+            "Date": "raw_date",
+            "HomeTeam": "raw_home_team",
+            "AwayTeam": "raw_away_team",
+            "FTHG": "raw_home_goals",
+            "FTAG": "raw_away_goals",
+        })
+        joined = sub.reset_index(drop=True).merge(
+            raw_sub, on="match_id", how="left", validate="one_to_one",
+            indicator=True,
         )
-        raw_sub = pd.DataFrame(raw_rows).reset_index(drop=True)
-        joined = sub.reset_index(drop=True).copy()
-        joined["matched_season_game"] = np.asarray(raw_indices, dtype=int) + 1
-        joined["date"] = raw_sub["Date"].dt.strftime("%Y-%m-%d")
-        joined["home_team"] = raw_sub["HomeTeam"].to_numpy()
-        joined["away_team"] = raw_sub["AwayTeam"].to_numpy()
-        joined["home_goals"] = raw_sub["FTHG"].to_numpy()
-        joined["away_goals"] = raw_sub["FTAG"].to_numpy()
+        missing = joined["_merge"] != "both"
+        if missing.any():
+            ids = ", ".join(joined.loc[missing, "match_id"].astype(str).head(3))
+            raise ValueError(f"Raw odds missing for {missing.sum()} MatchIDs: {ids}")
+        joined = joined.drop(columns="_merge")
+
+        identity_checks = [
+            ("home_team", "raw_home_team"),
+            ("away_team", "raw_away_team"),
+            ("home_goals", "raw_home_goals"),
+            ("away_goals", "raw_away_goals"),
+        ]
+        for stored_col, raw_col in identity_checks:
+            if stored_col not in joined:
+                continue
+            if "goals" in stored_col:
+                same = np.allclose(
+                    pd.to_numeric(joined[stored_col], errors="coerce"),
+                    pd.to_numeric(joined[raw_col], errors="coerce"),
+                    equal_nan=True,
+                )
+            else:
+                same = np.array_equal(
+                    joined[stored_col].astype(str).to_numpy(),
+                    joined[raw_col].astype(str).to_numpy(),
+                )
+            if not same:
+                raise ValueError(
+                    f"Match identity mismatch in {stored_col} for season {season}."
+                )
+        joined["matched_season_game"] = joined["raw_index"].to_numpy(dtype=int) + 1
+        joined["date"] = joined["raw_date"].dt.strftime("%Y-%m-%d")
+        joined["home_team"] = joined["raw_home_team"]
+        joined["away_team"] = joined["raw_away_team"]
+        joined["home_goals"] = joined["raw_home_goals"]
+        joined["away_goals"] = joined["raw_away_goals"]
+        joined = joined.drop(columns=[
+            "raw_index", "raw_date", "raw_home_team", "raw_away_team",
+            "raw_home_goals", "raw_away_goals",
+        ])
         for col in RAW_ODDS_COLUMNS:
-            joined[col] = raw_sub[col].to_numpy() if col in raw_sub.columns else np.nan
+            if col not in joined:
+                joined[col] = np.nan
         chunks.append(joined)
     return pd.concat(chunks, ignore_index=True)
 

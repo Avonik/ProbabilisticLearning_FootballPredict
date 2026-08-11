@@ -401,9 +401,12 @@ def plot_predicted_rankings(samples, L, save_path, n_replays: int = 1000,
             d_h = samples["defense"][s_idx][h][lh]
             a_a = samples["attack"][s_idx][a][la]
             d_a = samples["defense"][s_idx][a][la]
+            home_adv = (samples["home_advantage"][s_idx][h]
+                        if "home_advantage" in samples else 0.0)
             p_home, p_draw, p_away = predict_outcome_probs(
                 a_h, d_h, a_a, d_a, L.c_x, L.c_y,
                 gamma=L.gamma, eps=L.epsilon,
+                home_advantage=home_adv,
             )
             r = rng.random()
             if r < p_home:
@@ -513,6 +516,39 @@ def plot_team_ranking_summary(samples, L, save_path):
     ax.set_title("Team-Profile: Angriff vs. Abwehr\n"
                  "(rechts oben = stark in beidem, links unten = schwach)")
     fig.colorbar(sc, ax=ax, label="Gesamtstärke")
+    fig.tight_layout()
+    fig.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_team_home_advantage(samples, L, save_path):
+    """Posterior mean and 95% interval of each centered team home effect."""
+    values = samples.get("home_advantage")
+    if not values:
+        return
+    draws = np.stack(values)
+    mean = draws.mean(axis=0)
+    lo, hi = np.percentile(draws, [2.5, 97.5], axis=0)
+    order = np.argsort(mean)
+    y = np.arange(L.n_teams)
+
+    fig, ax = plt.subplots(figsize=(10, max(6, 0.42 * L.n_teams)))
+    ax.errorbar(
+        mean[order], y,
+        xerr=np.vstack([mean[order] - lo[order], hi[order] - mean[order]]),
+        fmt="o", color=PALETTE[0], ecolor="#8aaed0", capsize=3,
+    )
+    ax.axvline(0.0, color="#444444", linewidth=1.0)
+    ax.set_yticks(y)
+    ax.set_yticklabels([L.teams[i] for i in order])
+    ax.set_xlabel("Teamspezifischer Heimeffekt h (Log-Torverhältnis)")
+    ax.set_title("Heimvorteil relativ zum Liga-Mittel\nPosterior-Mittel und 95%-Intervall")
+    ax.text(
+        0.99, 0.01,
+        "exp(h) = Multiplikator des Heim/Auswärts-Torverhältnisses",
+        transform=ax.transAxes, ha="right", va="bottom", fontsize=9,
+        color="#555555",
+    )
     fig.tight_layout()
     fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)

@@ -26,6 +26,8 @@ from math import lgamma
 import numpy as np
 import pandas as pd
 
+from data import MATCH_ID_COL, sort_matches
+
 
 # === Paper-Defaults (Rue & Salvesen 2000) ===
 DEFAULT_TAU = 100.0          # Loss-of-memory Zeitkonstante (Tage)
@@ -34,6 +36,7 @@ DEFAULT_EPSILON = 0.2        # Mischungs-Wahrscheinlichkeit
 MAX_GOALS = 5                # Trunkierungsgrenze
 PRIOR_VAR = 1.0 / 37.0       # Prior-Varianz (Paper)
 DEFAULT_PHI = 5.0            # xG-Präzision: Var[xG|λ] = λ²/φ (nur continuous_obs)
+DEFAULT_HOME_ADV_PRIOR_SD = 0.15  # gemeinsamer Shrinkage-Prior je Team
 
 # Rückwärtskompatible Aliase (falls externer Code sie noch nutzt)
 TAU = DEFAULT_TAU
@@ -72,6 +75,7 @@ class League:
     team_matches: dict                # team_id -> list[match_idx]  (v1-API)
     local_idx: dict                   # (team_id, match_idx) -> local position
     dates: pd.DatetimeIndex
+    match_ids: np.ndarray
 
     # --- Was das Likelihood-Modell tatsächlich sieht ------------------
     obs_x: np.ndarray                 # Heim-Beobachtung: int (Goals/round(xG))
@@ -90,6 +94,8 @@ class League:
     gamma: float = DEFAULT_GAMMA
     epsilon: float = DEFAULT_EPSILON
     phi: float = DEFAULT_PHI          # xG-Präzision (nur bei continuous_obs)
+    use_team_home_advantage: bool = False
+    home_adv_prior_sd: float = DEFAULT_HOME_ADV_PRIOR_SD
 
     # --- Informativer Prior (optional) --------------------------------
     init_prior_mean: np.ndarray | None = None   # shape (n_teams,): Prior-Mittel
@@ -121,7 +127,9 @@ def build_league(df: pd.DataFrame,
                  continuous_xg: bool = False,
                  phi: float = DEFAULT_PHI,
                  team_values: dict | None = None,
-                 market_kappa: float = 0.0) -> League:
+                 market_kappa: float = 0.0,
+                 use_team_home_advantage: bool = False,
+                 home_adv_prior_sd: float = DEFAULT_HOME_ADV_PRIOR_SD) -> League:
     """Baut die League-Struktur aus dem Spiele-DataFrame.
 
     Wenn ``use_xg=True`` und die Spalten ``xG_home`` / ``xG_away`` vorhanden
@@ -134,7 +142,18 @@ def build_league(df: pd.DataFrame,
     Trunc-Poisson·Dixon-Coles-PMF. Die Vorhersage bleibt davon unberührt
     (weiterhin diskretes Poisson-Gitter).
     """
-    df = df.copy().sort_values("Date").reset_index(drop=True)
+    if "Season" in df.columns:
+        df = sort_matches(df)
+    else:
+        df = (df.copy()
+              .sort_values(["Date", "HomeTeam", "AwayTeam"], kind="stable")
+              .reset_index(drop=True))
+        df[MATCH_ID_COL] = (
+            pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d") + "|" +
+            df["HomeTeam"].astype(str) + "|" + df["AwayTeam"].astype(str)
+        )
+    if home_adv_prior_sd <= 0:
+        raise ValueError("home_adv_prior_sd must be positive.")
 
     teams = sorted(set(df["HomeTeam"]) | set(df["AwayTeam"]))
     t2i = {t: i for i, t in enumerate(teams)}
@@ -233,6 +252,7 @@ def build_league(df: pd.DataFrame,
         c_x=c_x, c_y=c_y,
         team_matches=team_matches, local_idx=local_idx,
         dates=pd.DatetimeIndex(df["Date"]),
+        match_ids=df[MATCH_ID_COL].astype(str).to_numpy(),
         obs_x=obs_x, obs_y=obs_y,
         team_start=team_start,
         team_matches_flat=team_matches_flat,
@@ -240,6 +260,8 @@ def build_league(df: pd.DataFrame,
         match_home_local=match_home_local,
         match_away_local=match_away_local,
         tau=tau, gamma=gamma, epsilon=epsilon, phi=phi,
+        use_team_home_advantage=use_team_home_advantage,
+        home_adv_prior_sd=home_adv_prior_sd,
         init_prior_mean=init_prior_mean,
         xg_home=xg_home, xg_away=xg_away, use_xg=use_xg,
         continuous_obs=continuous_obs,
@@ -287,11 +309,18 @@ def dc_correction(x: int, y: int, lam_x: float, lam_y: float) -> float:
     return 1.0
 
 
-def compute_lambdas(a_h, d_h, a_a, d_a, c_x, c_y, gamma=DEFAULT_GAMMA):
-    """λ_x (Heim) und λ_y (Auswärts) aus Stärken berechnen."""
+def compute_lambdas(a_h, d_h, a_a, d_a, c_x, c_y,
+                    gamma=DEFAULT_GAMMA, home_advantage: float = 0.0):
+    """Compute goal intensities including the home team's deviation.
+
+    ``c_x - c_y`` remains the league-wide home advantage.  The team effect is
+    split symmetrically so that it changes the log goal ratio by exactly
+    ``home_advantage`` while keeping the sum of log intensities constant.
+    """
     delta = (a_h + d_h - a_a - d_a) / 2.0
-    log_lam_x = c_x + a_h - d_a - gamma * delta
-    log_lam_y = c_y + a_a - d_h + gamma * delta
+    half_home_adv = 0.5 * home_advantage
+    log_lam_x = c_x + a_h - d_a - gamma * delta + half_home_adv
+    log_lam_y = c_y + a_a - d_h + gamma * delta - half_home_adv
     return np.exp(log_lam_x), np.exp(log_lam_y)
 
 
@@ -308,9 +337,12 @@ def match_likelihood(x: int, y: int, lam_x: float, lam_y: float,
 
 def predict_outcome_probs(a_h, d_h, a_a, d_a, c_x, c_y,
                           gamma=DEFAULT_GAMMA, eps=DEFAULT_EPSILON,
-                          max_k: int = MAX_GOALS):
+                          max_k: int = MAX_GOALS,
+                          home_advantage: float = 0.0):
     """P(Heimsieg), P(Unentschieden), P(Auswärtssieg)."""
-    lam_x, lam_y = compute_lambdas(a_h, d_h, a_a, d_a, c_x, c_y, gamma)
+    lam_x, lam_y = compute_lambdas(
+        a_h, d_h, a_a, d_a, c_x, c_y, gamma, home_advantage,
+    )
     lam_x_avg, lam_y_avg = np.exp(c_x), np.exp(c_y)
 
     p_home = p_draw = p_away = 0.0
@@ -344,12 +376,15 @@ def predict_match(samples, L, team1: str, team2: str,
         c_x = c_y = (c_x + c_y) / 2
 
     p1_list, pd_list, p2_list = [], [], []
-    for sa, sd in zip(samples["attack"], samples["defense"]):
+    home_samples = samples.get("home_advantage")
+    for sample_i, (sa, sd) in enumerate(zip(samples["attack"], samples["defense"])):
         a1, d1 = float(sa[t1][-1]), float(sd[t1][-1])
         a2, d2 = float(sa[t2][-1]), float(sd[t2][-1])
+        home_adv = (float(home_samples[sample_i][t1])
+                    if home_samples is not None and not neutral else 0.0)
         p1, pd_, p2 = predict_outcome_probs(
             a1, d1, a2, d2, c_x, c_y,
-            gamma=L.gamma, eps=L.epsilon,
+            gamma=L.gamma, eps=L.epsilon, home_advantage=home_adv,
         )
         p1_list.append(p1)
         pd_list.append(pd_)
@@ -380,10 +415,16 @@ def predict_scoreline(samples, L, team1: str, team2: str,
         c_x = c_y = (c_x + c_y) / 2
 
     mat = np.zeros((MAX_GOALS + 1, MAX_GOALS + 1))
-    for sa, sd in zip(samples["attack"], samples["defense"]):
+    home_samples = samples.get("home_advantage")
+    for sample_i, (sa, sd) in enumerate(zip(samples["attack"], samples["defense"])):
         a1, d1 = float(sa[t1][-1]), float(sd[t1][-1])
         a2, d2 = float(sa[t2][-1]), float(sd[t2][-1])
-        lam_x, lam_y = compute_lambdas(a1, d1, a2, d2, c_x, c_y, gamma=L.gamma)
+        home_adv = (float(home_samples[sample_i][t1])
+                    if home_samples is not None and not neutral else 0.0)
+        lam_x, lam_y = compute_lambdas(
+            a1, d1, a2, d2, c_x, c_y,
+            gamma=L.gamma, home_advantage=home_adv,
+        )
         lam_x_avg, lam_y_avg = np.exp(c_x), np.exp(c_y)
         for x in range(MAX_GOALS + 1):
             for y in range(MAX_GOALS + 1):

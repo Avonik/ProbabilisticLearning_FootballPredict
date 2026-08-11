@@ -43,7 +43,7 @@ import pandas as pd
 
 from data import load_bundesliga, extract_bookmaker_probs
 from xg import fit_xg_weights, add_xg_columns, xg_summary
-from model import build_league
+from model import build_league, DEFAULT_HOME_ADV_PRIOR_SD
 from parallel import run_mcmc_parallel
 from tune import tune_hyperparameters, tune_paperstyle
 from viz import (
@@ -57,6 +57,7 @@ from viz import (
     plot_predicted_rankings,
     plot_surprise_matches,
     plot_team_ranking_summary,
+    plot_team_home_advantage,
     plot_xg_vs_goals,
     plot_hyperparameter_scan,
 )
@@ -79,6 +80,10 @@ ANALYSIS_SEASON = "2025/26"
 
 # xG verwenden? (True → gerundetes xG füttert die Likelihood)
 USE_XG = True
+
+# Hierarchisch geschrumpfte Abweichung vom ligaweiten Heimvorteil je Team.
+USE_TEAM_HOME_ADVANTAGE = True
+TEAM_HOME_ADV_PRIOR_SD = DEFAULT_HOME_ADV_PRIOR_SD
 
 # Hyperparameter-Tuning
 #   "paper":  Multi-Season-Tuning analog Rue & Salvesen 2000, Abschnitt 3.2
@@ -126,7 +131,11 @@ OUT = OUTPUT_ROOT
 
 CACHE_DIR = Path("cache_v2")
 CACHE_DIR.mkdir(exist_ok=True)
-MCMC_CACHE = CACHE_DIR / f"mcmc_{ANALYSIS_SEASON.replace('/','_')}_{N_CHAINS}c_{N_ITER}i_{'xg' if USE_XG else 'goals'}.pkl"
+MCMC_CACHE = CACHE_DIR / (
+    f"mcmc_{ANALYSIS_SEASON.replace('/','_')}_{N_CHAINS}c_{N_ITER}i_"
+    f"{'xg' if USE_XG else 'goals'}"
+    f"{'_teamhome' if USE_TEAM_HOME_ADVANTAGE else ''}.pkl"
+)
 TUNE_CACHE = CACHE_DIR / f"tune_{TUNE_MODE}_{ANALYSIS_SEASON.replace('/','_')}_{'xg' if USE_XG else 'goals'}.pkl"
 
 
@@ -276,10 +285,15 @@ def main():
     L = build_league(df_season, use_xg=USE_XG,
                      tau=best_tau, gamma=best_gamma, epsilon=best_eps,
                      team_values=market_values,
-                     market_kappa=MARKET_PRIOR_KAPPA if USE_MARKET_PRIOR else 0.0)
+                     market_kappa=MARKET_PRIOR_KAPPA if USE_MARKET_PRIOR else 0.0,
+                     use_team_home_advantage=USE_TEAM_HOME_ADVANTAGE,
+                     home_adv_prior_sd=TEAM_HOME_ADV_PRIOR_SD)
     print(f"  League: {L.n_teams} Teams, {L.n_matches} Spiele, "
           f"{int(L.team_start[-1])} Stärken-Knoten")
     print(f"  Beobachtung: {'gerundetes xG' if USE_XG else 'tatsächliche Tore'}")
+    print("  Teamspezifischer Heimvorteil: " +
+          (f"AN (Prior-SD={TEAM_HOME_ADV_PRIOR_SD:g})"
+           if USE_TEAM_HOME_ADVANTAGE else "AUS"))
 
     if MCMC_CACHE.exists():
         print(f"  Lade MCMC-Cache: {MCMC_CACHE.name}")
@@ -316,6 +330,10 @@ def main():
     print("  → Überraschungsspiele ...")
     plot_surprise_matches(samples, L, df_season,
                           OUT / "10_ueberraschungs_spiele.png")
+    if USE_TEAM_HOME_ADVANTAGE:
+        print("  → Teamspezifischer Heimvorteil ...")
+        plot_team_home_advantage(samples, L,
+                                 OUT / "15_team_home_advantage.png")
 
     # ─── Buchmacher-Vergleich: NICHT hier ────────────────────────────
     # Die ehrliche Vorhersage-Evaluation (RPS-Vergleich gegen Buchmacher)

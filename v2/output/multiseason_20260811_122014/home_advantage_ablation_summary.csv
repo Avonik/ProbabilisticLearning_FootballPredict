@@ -1,0 +1,2 @@
+comparison,n,seasons,rps_baseline,rps_teamhome,delta_baseline_minus_teamhome,ci_lo_season_block,ci_hi_season_block,wilcoxon_p,frac_matches_teamhome_better
+teamhome_vs_baseline,925,10,0.20366958535953472,0.20365287691948972,1.6708440045028397e-05,-0.0008409393720312973,0.0008714511086305201,0.7716813696952328,0.5102702702702703
