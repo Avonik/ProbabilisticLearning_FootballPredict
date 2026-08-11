@@ -28,6 +28,31 @@ Der MCMC-Lauf braucht je nach Rechner 5–20 Minuten. Das Ergebnis wird in `mcmc
 
 Alle Plots landen im Ordner `output/`.
 
+## Aktueller Forschungsstand: teamspezifischer Heimvorteil
+
+Das Modell unterstützt zusätzlich zum ligaweiten Heimvorteil eine
+teamspezifische, hierarchisch geschrumpfte Abweichung. Optional kann ihr
+Prior-Mittelwert leckfrei aus den letzten drei abgeschlossenen Saisons
+übernommen werden (`historical_home.py`); neuere Saisons werden stärker
+gewichtet, Aufsteiger ohne Historie starten bei null.
+
+Die vollständige 10-Saison-Ablation des innerhalb einer Saison geschätzten
+Teamparameters zeigte praktisch keine RPS-Verbesserung (`+0.000017`,
+`p=0.772`). Ein zusätzlicher mittlerer Test des historischen Carry-overs auf
+277 Holdout-Spielen aus 2022/23–2024/25 war in allen drei Saisons leicht
+schlechter: RPS `0.202499` statt `0.201220`; Block-Bootstrap-95%-KI der
+Verbesserung `[-0.003608, +0.001149]`, `p=0.374`. Wegen des reduzierten
+MCMC-Budgets und hohen R-hat ist dies keine finale Konvergenzaussage, liefert
+aber keine Evidenz für die komplexere Variante. Details stehen in
+`MODELL_HISTORIE.md`, Abschnitt 8–9.
+
+Reproduzierbare kleinere Ablationen:
+
+```bash
+python quick_test_historical_home.py
+python medium_test_historical_home.py
+```
+
 ## Konfiguration
 
 In `run.py` ganz oben:
@@ -109,7 +134,9 @@ bundesliga_pipeline/
 ## Bekannte Einschränkungen
 
 - MCMC ist in reinem Python implementiert; auf großen Saisons ist es langsam. Für Produktionscode würde man Numba / Cython / JAX nutzen.
-- Pre-Promotion-Teams (aufsteigende Mannschaften) bekommen den Standard-Prior; mit Vor-Saison-Daten könnte man hier besser starten.
+- Aufsteiger ohne Bundesliga-Historie bekommen beim optionalen historischen
+  Heimvorteil weiterhin den Liga-Prior null; wiederkehrende Teams können aus
+  bis zu drei abgeschlossenen Vorsaisons starten.
 - `EPSILON = 0.2`, `TAU = 100`, `GAMMA = 0.1` sind die Paper-Werte. Für eine andere Liga wären eigene Schätzungen sinnvoll (Grid Search über die Pseudolikelihood, siehe Paper §3.2).
 
 ## Quelle

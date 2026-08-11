@@ -1,0 +1,27 @@
+{
+  "seasons": [
+    "2022/23",
+    "2023/24",
+    "2024/25"
+  ],
+  "n": 277,
+  "rps_current": 0.20122014896110121,
+  "rps_historical": 0.20249938166061698,
+  "delta_rps_current_minus_historical": -0.0012792326995157673,
+  "matchday_block_bootstrap_ci95": [
+    -0.0036076587794328352,
+    0.0011493764965974853
+  ],
+  "wilcoxon_p": 0.373933959764828,
+  "fraction_historical_better": 0.5090252707581228,
+  "mean_abs_probability_shift": 0.014442677405665665,
+  "config": {
+    "holdout_frac": 0.3,
+    "n_chains": 2,
+    "base_iter": 6000,
+    "warm_iter": 3000,
+    "history_iter": 6000,
+    "history_seasons": 3,
+    "history_decay": 0.65
+  }
+}

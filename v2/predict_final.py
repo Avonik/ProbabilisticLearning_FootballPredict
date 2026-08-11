@@ -39,6 +39,7 @@ ANALYSIS_SEASON = "2025/26"
 USE_XG     = True
 USE_TEAM_HOME_ADVANTAGE = True
 TEAM_HOME_ADV_PRIOR_SD = 0.15
+USE_HISTORICAL_HOME_PRIOR = True
 N_CHAINS   = 4
 N_ITER     = 500_000
 TUNE_MODE  = "paper"
@@ -49,7 +50,8 @@ CACHE_DIR  = Path(__file__).resolve().parent / "cache_v2"
 CACHE      = CACHE_DIR / (
     f"mcmc_{ANALYSIS_SEASON.replace('/','_')}_{N_CHAINS}c_{N_ITER}i_"
     f"{'xg' if USE_XG else 'goals'}"
-    f"{'_teamhome' if USE_TEAM_HOME_ADVANTAGE else ''}.pkl"
+    f"{'_teamhome' if USE_TEAM_HOME_ADVANTAGE else ''}"
+    f"{'_hist3d065' if USE_TEAM_HOME_ADVANTAGE and USE_HISTORICAL_HOME_PRIOR else ''}.pkl"
 )
 TUNE_CACHE = CACHE_DIR / f"tune_{TUNE_MODE}_{ANALYSIS_SEASON.replace('/','_')}_{'xg' if USE_XG else 'goals'}.pkl"
 # =====================

@@ -61,6 +61,7 @@ from evaluation import (
     bookmaker_probs_from_df, uniform_baseline, empirical_baseline,
     evaluate_predictions, outcome_index,
 )
+from historical_home import estimate_historical_home_prior
 # viz (matplotlib) wird erst in main() importiert — so müssen die parallelen
 # Ketten-Worker-Prozesse kein matplotlib laden.
 
@@ -86,6 +87,16 @@ PHI               = 5.0
 # zero.  The sum-to-zero constraint is preserved by pairwise MCMC proposals.
 USE_TEAM_HOME_ADVANTAGE = True
 TEAM_HOME_ADV_PRIOR_SD = DEFAULT_HOME_ADV_PRIOR_SD
+
+# Carry team-specific home effects across seasons without leaking target-season
+# outcomes. Each completed historical season is fitted once and cached. The
+# latest seasons receive the largest weight; promoted/unknown teams start at 0.
+USE_HISTORICAL_HOME_PRIOR = True
+HOME_ADV_HISTORY_SEASONS = 3
+HOME_ADV_HISTORY_DECAY = 0.65
+HOME_ADV_HISTORY_ITER = 8_000
+HOME_ADV_HISTORY_BURNIN = 2_000
+HOME_ADV_HISTORY_THIN = 10
 
 # Echtes Understat-xG (ab 2014/15) statt Schuss-Proxy?  → real_xg.py holt es
 # via soccerdata (gecached) und überschreibt xG_home/xG_away wo verfügbar;
@@ -284,6 +295,12 @@ def walkforward_predictions(
     market_values: dict | None = None, market_kappa: float = 0.0,
     use_team_home_advantage: bool = USE_TEAM_HOME_ADVANTAGE,
     home_adv_prior_sd: float = TEAM_HOME_ADV_PRIOR_SD,
+    use_historical_home_prior: bool = USE_HISTORICAL_HOME_PRIOR,
+    home_adv_history_seasons: int = HOME_ADV_HISTORY_SEASONS,
+    home_adv_history_decay: float = HOME_ADV_HISTORY_DECAY,
+    home_adv_history_iter: int = HOME_ADV_HISTORY_ITER,
+    home_adv_history_burnin: int = HOME_ADV_HISTORY_BURNIN,
+    home_adv_history_thin: int = HOME_ADV_HISTORY_THIN,
 ) -> dict:
     """
     Liefert out-of-sample Modell-Wahrscheinlichkeiten für die Holdout-Spiele
@@ -325,6 +342,35 @@ def walkforward_predictions(
               (f"AN (Prior-SD={home_adv_prior_sd:g})"
                if use_team_home_advantage else "AUS"))
 
+    historical_home_prior: dict[str, float] = {}
+    history_info: dict = {"seasons": [], "cache_hits": 0}
+    if use_team_home_advantage and use_historical_home_prior:
+        historical_home_prior, history_info = estimate_historical_home_prior(
+            df_full,
+            target_season=season,
+            target_teams=sorted(set(df_season["HomeTeam"]) |
+                                set(df_season["AwayTeam"])),
+            use_xg=use_xg,
+            tau=tau, gamma=gamma, epsilon=eps,
+            continuous_xg=continuous_xg, phi=phi,
+            prior_sd=home_adv_prior_sd,
+            n_seasons=home_adv_history_seasons,
+            decay=home_adv_history_decay,
+            n_iter=home_adv_history_iter,
+            burnin=home_adv_history_burnin,
+            thin=home_adv_history_thin,
+            proposal_sd=proposal_sd,
+            seed=seed + 50_000,
+            cache_dir=CACHE_DIR / "historical_home",
+        )
+        if verbose:
+            seasons_text = ", ".join(history_info["seasons"]) or "keine"
+            nonzero = sum(abs(v) > 1e-12 for v in historical_home_prior.values())
+            print(f"  Historischer Heim-Prior: {seasons_text}; "
+                  f"{nonzero}/{len(historical_home_prior)} Teams mit Historie "
+                  f"(Decay={home_adv_history_decay:g}, "
+                  f"Cache-Hits={history_info['cache_hits']})")
+
     probs_model = np.full((n, 3), np.nan)
     warm: dict[str, tuple[float, float]] | None = None
     warm_home: dict[str, float] | None = None
@@ -346,14 +392,15 @@ def walkforward_predictions(
                              continuous_xg=continuous_xg, phi=phi,
                              team_values=market_values, market_kappa=market_kappa,
                              use_team_home_advantage=use_team_home_advantage,
-                             home_adv_prior_sd=home_adv_prior_sd)
+                             home_adv_prior_sd=home_adv_prior_sd,
+                             home_adv_prior_means=historical_home_prior)
             n_total = int(L.team_start[-1])
 
             # Warm-Start-Basis (zuletzt bekannte Stärken) + Iterationsbudget
             if warm is None:
                 base_a = np.zeros(n_total)
                 base_d = np.zeros(n_total)
-                base_h = np.zeros(L.n_teams)
+                base_h = np.asarray(L.home_adv_prior_mean, dtype=float).copy()
                 n_iter, burnin = base_iter, base_burnin
             else:
                 base_a, base_d = _flat_init(L, warm)
@@ -365,7 +412,7 @@ def walkforward_predictions(
                 # ── Eine Kette (Warm-Start ohne Jitter) ──────────────────
                 ia = None if warm is None else base_a
                 id_ = None if warm is None else base_d
-                ih = None if warm is None else base_h
+                ih = (base_h if use_team_home_advantage else None)
                 samples = run_mcmc(
                     L, n_iter=n_iter, burnin=burnin, thin=thin,
                     proposal_sd=proposal_sd, seed=seed + di, verbose=False,
@@ -435,6 +482,8 @@ def walkforward_predictions(
         "df_season": df_season,
         "rhat_max": rhat_max,
         "home_advantages": warm_home or {},
+        "historical_home_prior": historical_home_prior,
+        "historical_home_info": history_info,
     }
 
 
@@ -496,6 +545,8 @@ def evaluate_season_walkforward(
         "n":               n,
         "n_common":        int(common.sum()),
         "rhat_max":        wf.get("rhat_max"),
+        "historical_home_prior": wf.get("historical_home_prior", {}),
+        "historical_home_info": wf.get("historical_home_info", {}),
     }
     return comparison
 

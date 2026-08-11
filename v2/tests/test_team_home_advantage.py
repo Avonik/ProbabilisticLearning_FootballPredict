@@ -13,6 +13,7 @@ if str(V2_DIR) not in sys.path:
 
 from model import build_league, compute_lambdas, predict_outcome_probs
 from mcmc import posterior_home_advantage, run_mcmc
+from historical_home import combine_season_effects
 
 
 class TeamHomeAdvantageTests(unittest.TestCase):
@@ -71,6 +72,54 @@ class TeamHomeAdvantageTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(
             np.stack(disabled_samples["home_advantage"]), 0.0,
+        )
+
+    def test_historical_prior_mapping_and_promoted_team(self) -> None:
+        df = pd.DataFrame([
+            {"Season": "2024/25", "Date": "2024-08-01", "HomeTeam": "A",
+             "AwayTeam": "B", "FTHG": 1, "FTAG": 0},
+            {"Season": "2024/25", "Date": "2024-08-02", "HomeTeam": "C",
+             "AwayTeam": "A", "FTHG": 1, "FTAG": 1},
+        ])
+        league = build_league(
+            df, use_team_home_advantage=True,
+            home_adv_prior_means={"A": 0.20, "B": -0.10},
+        )
+        mapped = dict(zip(league.teams, league.home_adv_prior_mean))
+        self.assertAlmostEqual(mapped["A"], 0.15)
+        self.assertAlmostEqual(mapped["B"], -0.15)
+        self.assertEqual(mapped["C"], 0.0)
+        self.assertAlmostEqual(float(league.home_adv_prior_mean.sum()), 0.0)
+
+    def test_recency_weighting_and_missing_history(self) -> None:
+        combined = combine_season_effects(
+            [{"A": 0.30, "B": -0.30}, {"A": 0.10, "B": -0.10}],
+            ["A", "B", "Promoted"], decay=0.5,
+        )
+        self.assertAlmostEqual(combined["A"], (0.5 * 0.30 + 0.10) / 1.5)
+        self.assertAlmostEqual(combined["B"], -(0.5 * 0.30 + 0.10) / 1.5)
+        self.assertEqual(combined["Promoted"], 0.0)
+
+    def test_mcmc_seed_is_reproducible(self) -> None:
+        df = pd.DataFrame([
+            {"Season": "2024/25", "Date": f"2024-08-{day:02d}",
+             "HomeTeam": "A" if day % 2 else "B",
+             "AwayTeam": "B" if day % 2 else "A",
+             "FTHG": day % 3, "FTAG": (day + 1) % 3}
+            for day in range(1, 9)
+        ])
+        league = build_league(df, use_team_home_advantage=True)
+        first = run_mcmc(
+            league, n_iter=80, burnin=20, thin=10,
+            proposal_sd=0.05, seed=99, verbose=False,
+        )
+        second = run_mcmc(
+            league, n_iter=80, burnin=20, thin=10,
+            proposal_sd=0.05, seed=99, verbose=False,
+        )
+        np.testing.assert_array_equal(
+            np.stack(first["home_advantage"]),
+            np.stack(second["home_advantage"]),
         )
 
 

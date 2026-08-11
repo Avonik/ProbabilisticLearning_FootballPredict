@@ -52,6 +52,12 @@ _LOG_FACT = np.array([
 # Numba-kompilierte Hilfsfunktionen
 # ─────────────────────────────────────────────────────────────────────
 
+@njit(cache=True)
+def _seed_numba(seed: int) -> None:
+    """Seed Numba's RNG (separate from Python/NumPy's RNG state)."""
+    np.random.seed(seed)
+
+
 @njit(cache=True, fastmath=True)
 def _poisson_pmf(k, lam):
     if lam <= 0.0:
@@ -193,7 +199,7 @@ def _run_chunk(
     # Hyperparameter
     c_x, c_y, gamma, epsilon, tau, sigma2,
     init_prior_mean,         # shape (n_teams,): Prior-Mittel der Initial-Stärke
-    use_team_home_advantage, home_adv_prior_var,
+    use_team_home_advantage, home_adv_prior_mean, home_adv_prior_var,
     max_k,
     continuous, phi,
     proposal_sd,
@@ -331,10 +337,14 @@ def _run_chunk(
                 proposed_j = current_j - shift
 
                 log_alpha = 0.0
-                log_alpha += _initial_prior_logpdf(proposed_i, 0.0, home_adv_prior_var)
-                log_alpha += _initial_prior_logpdf(proposed_j, 0.0, home_adv_prior_var)
-                log_alpha -= _initial_prior_logpdf(current_i, 0.0, home_adv_prior_var)
-                log_alpha -= _initial_prior_logpdf(current_j, 0.0, home_adv_prior_var)
+                log_alpha += _initial_prior_logpdf(
+                    proposed_i, home_adv_prior_mean[team_i], home_adv_prior_var)
+                log_alpha += _initial_prior_logpdf(
+                    proposed_j, home_adv_prior_mean[team_j], home_adv_prior_var)
+                log_alpha -= _initial_prior_logpdf(
+                    current_i, home_adv_prior_mean[team_i], home_adv_prior_var)
+                log_alpha -= _initial_prior_logpdf(
+                    current_j, home_adv_prior_mean[team_j], home_adv_prior_var)
 
                 old_ll = 0.0
                 for pair_pos in range(2):
@@ -486,6 +496,7 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
             Indikatoren (shape ``(n_matches,)``).
     """
     np.random.seed(seed)
+    _seed_numba(seed)
 
     n_total = int(L.team_start[-1])
     attack_flat = np.zeros(n_total, dtype=np.float64)
@@ -507,6 +518,13 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
         init_prior_mean = np.ascontiguousarray(L.init_prior_mean, dtype=np.float64)
     else:
         init_prior_mean = np.zeros(L.n_teams, dtype=np.float64)
+
+    if getattr(L, "home_adv_prior_mean", None) is not None:
+        home_adv_prior_mean = np.ascontiguousarray(
+            L.home_adv_prior_mean, dtype=np.float64,
+        )
+    else:
+        home_adv_prior_mean = np.zeros(L.n_teams, dtype=np.float64)
 
     # Sample-Buffer-Größe vorab bestimmen
     n_post = max(0, n_iter - burnin)
@@ -535,7 +553,8 @@ def run_mcmc(L: League, n_iter: int = 5000, burnin: int = 1000,
             L.obs_x, L.obs_y,
             L.c_x, L.c_y, L.gamma, L.epsilon, L.tau, PRIOR_VAR,
             init_prior_mean,
-            int(L.use_team_home_advantage), L.home_adv_prior_sd ** 2,
+            int(L.use_team_home_advantage), home_adv_prior_mean,
+            L.home_adv_prior_sd ** 2,
             MAX_GOALS,
             int(L.continuous_obs), L.phi,
             proposal_sd,
@@ -617,6 +636,7 @@ def warmup_jit():
     sh = np.zeros((1, 2))
     sdt = np.zeros((1, 1), dtype=np.int64)
     ipm = np.zeros(2, dtype=np.float64)   # init_prior_mean: 2 Dummy-Teams
+    hpm = np.zeros(2, dtype=np.float64)   # home_adv_prior_mean
     # Beide Branch-Spezialisierungen kompilieren: diskret (int64-obs,
     # continuous=0) und kontinuierlich (float64-obs, continuous=1).
     _run_chunk(
@@ -625,7 +645,7 @@ def warmup_jit():
         home_idx, away_idx, match_home_local, match_away_local,
         obs_x, obs_y,
         0.5, 0.1, 0.1, 0.2, 100.0, 1.0 / 37.0,
-        ipm, 1, 0.15 ** 2,
+        ipm, 1, hpm, 0.15 ** 2,
         5, 0, 5.0, 0.05, 0, 1, 0, 1, sa, sd, sh, sdt, 0,
     )
     _run_chunk(
@@ -634,6 +654,6 @@ def warmup_jit():
         home_idx, away_idx, match_home_local, match_away_local,
         obs_x_f, obs_y_f,
         0.5, 0.1, 0.1, 0.2, 100.0, 1.0 / 37.0,
-        ipm, 1, 0.15 ** 2,
+        ipm, 1, hpm, 0.15 ** 2,
         5, 1, 5.0, 0.05, 0, 1, 0, 1, sa, sd, sh, sdt, 0,
     )

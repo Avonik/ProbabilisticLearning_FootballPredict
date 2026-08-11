@@ -44,6 +44,7 @@ import pandas as pd
 from data import load_bundesliga, extract_bookmaker_probs
 from xg import fit_xg_weights, add_xg_columns, xg_summary
 from model import build_league, DEFAULT_HOME_ADV_PRIOR_SD
+from historical_home import estimate_historical_home_prior
 from parallel import run_mcmc_parallel
 from tune import tune_hyperparameters, tune_paperstyle
 from viz import (
@@ -84,6 +85,12 @@ USE_XG = True
 # Hierarchisch geschrumpfte Abweichung vom ligaweiten Heimvorteil je Team.
 USE_TEAM_HOME_ADVANTAGE = True
 TEAM_HOME_ADV_PRIOR_SD = DEFAULT_HOME_ADV_PRIOR_SD
+USE_HISTORICAL_HOME_PRIOR = True
+HOME_ADV_HISTORY_SEASONS = 3
+HOME_ADV_HISTORY_DECAY = 0.65
+HOME_ADV_HISTORY_ITER = 20_000
+HOME_ADV_HISTORY_BURNIN = 4_000
+HOME_ADV_HISTORY_THIN = 10
 
 # Hyperparameter-Tuning
 #   "paper":  Multi-Season-Tuning analog Rue & Salvesen 2000, Abschnitt 3.2
@@ -134,7 +141,8 @@ CACHE_DIR.mkdir(exist_ok=True)
 MCMC_CACHE = CACHE_DIR / (
     f"mcmc_{ANALYSIS_SEASON.replace('/','_')}_{N_CHAINS}c_{N_ITER}i_"
     f"{'xg' if USE_XG else 'goals'}"
-    f"{'_teamhome' if USE_TEAM_HOME_ADVANTAGE else ''}.pkl"
+    f"{'_teamhome' if USE_TEAM_HOME_ADVANTAGE else ''}"
+    f"{'_hist3d065' if USE_TEAM_HOME_ADVANTAGE and USE_HISTORICAL_HOME_PRIOR else ''}.pkl"
 )
 TUNE_CACHE = CACHE_DIR / f"tune_{TUNE_MODE}_{ANALYSIS_SEASON.replace('/','_')}_{'xg' if USE_XG else 'goals'}.pkl"
 
@@ -282,12 +290,34 @@ def main():
         print(f"  Marktwert-Prior aktiv (κ={MARKET_PRIOR_KAPPA}): "
               f"{len(market_values)} Teams mit Wert geladen.")
 
+    historical_home_prior = {}
+    if USE_TEAM_HOME_ADVANTAGE and USE_HISTORICAL_HOME_PRIOR:
+        historical_home_prior, history_info = estimate_historical_home_prior(
+            df, target_season=ANALYSIS_SEASON,
+            target_teams=sorted(set(df_season["HomeTeam"]) |
+                                set(df_season["AwayTeam"])),
+            use_xg=USE_XG, tau=best_tau, gamma=best_gamma,
+            epsilon=best_eps, continuous_xg=False, phi=5.0,
+            prior_sd=TEAM_HOME_ADV_PRIOR_SD,
+            n_seasons=HOME_ADV_HISTORY_SEASONS,
+            decay=HOME_ADV_HISTORY_DECAY,
+            n_iter=HOME_ADV_HISTORY_ITER,
+            burnin=HOME_ADV_HISTORY_BURNIN,
+            thin=HOME_ADV_HISTORY_THIN,
+            proposal_sd=PROPOSAL_SD, seed=SEED + 50_000,
+            cache_dir=CACHE_DIR / "historical_home",
+        )
+        print(f"  Historischer Heim-Prior aus {history_info['seasons']} "
+              f"(Decay={HOME_ADV_HISTORY_DECAY:g}, "
+              f"Cache-Hits={history_info['cache_hits']}).")
+
     L = build_league(df_season, use_xg=USE_XG,
                      tau=best_tau, gamma=best_gamma, epsilon=best_eps,
                      team_values=market_values,
                      market_kappa=MARKET_PRIOR_KAPPA if USE_MARKET_PRIOR else 0.0,
                      use_team_home_advantage=USE_TEAM_HOME_ADVANTAGE,
-                     home_adv_prior_sd=TEAM_HOME_ADV_PRIOR_SD)
+                     home_adv_prior_sd=TEAM_HOME_ADV_PRIOR_SD,
+                     home_adv_prior_means=historical_home_prior)
     print(f"  League: {L.n_teams} Teams, {L.n_matches} Spiele, "
           f"{int(L.team_start[-1])} Stärken-Knoten")
     print(f"  Beobachtung: {'gerundetes xG' if USE_XG else 'tatsächliche Tore'}")

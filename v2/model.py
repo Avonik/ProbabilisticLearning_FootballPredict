@@ -96,6 +96,7 @@ class League:
     phi: float = DEFAULT_PHI          # xG-Präzision (nur bei continuous_obs)
     use_team_home_advantage: bool = False
     home_adv_prior_sd: float = DEFAULT_HOME_ADV_PRIOR_SD
+    home_adv_prior_mean: np.ndarray | None = None
 
     # --- Informativer Prior (optional) --------------------------------
     init_prior_mean: np.ndarray | None = None   # shape (n_teams,): Prior-Mittel
@@ -129,7 +130,8 @@ def build_league(df: pd.DataFrame,
                  team_values: dict | None = None,
                  market_kappa: float = 0.0,
                  use_team_home_advantage: bool = False,
-                 home_adv_prior_sd: float = DEFAULT_HOME_ADV_PRIOR_SD) -> League:
+                 home_adv_prior_sd: float = DEFAULT_HOME_ADV_PRIOR_SD,
+                 home_adv_prior_means: dict[str, float] | None = None) -> League:
     """Baut die League-Struktur aus dem Spiele-DataFrame.
 
     Wenn ``use_xg=True`` und die Spalten ``xG_home`` / ``xG_away`` vorhanden
@@ -244,6 +246,23 @@ def build_league(df: pd.DataFrame,
             if sd > 0.0:
                 init_prior_mean[mask] = market_kappa * (logv[mask] - mu) / sd
 
+    # Informative mean for the team-specific home effect. Historical values
+    # are matched by team name; promoted/unknown teams stay at the league
+    # mean (zero). Center only the known teams so the mean vector satisfies
+    # the sampler's sum-to-zero identification without assigning a made-up
+    # historical effect to promoted teams.
+    home_adv_prior_mean = np.zeros(n_teams, dtype=np.float64)
+    if home_adv_prior_means:
+        known = np.array(
+            [team in home_adv_prior_means for team in teams], dtype=bool,
+        )
+        if known.any():
+            home_adv_prior_mean[known] = np.array(
+                [float(home_adv_prior_means[team]) for team in np.array(teams)[known]],
+                dtype=np.float64,
+            )
+            home_adv_prior_mean[known] -= home_adv_prior_mean[known].mean()
+
     return League(
         teams=teams,
         home_idx=home_idx, away_idx=away_idx,
@@ -262,6 +281,7 @@ def build_league(df: pd.DataFrame,
         tau=tau, gamma=gamma, epsilon=epsilon, phi=phi,
         use_team_home_advantage=use_team_home_advantage,
         home_adv_prior_sd=home_adv_prior_sd,
+        home_adv_prior_mean=home_adv_prior_mean,
         init_prior_mean=init_prior_mean,
         xg_home=xg_home, xg_away=xg_away, use_xg=use_xg,
         continuous_obs=continuous_obs,

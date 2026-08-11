@@ -1,6 +1,6 @@
 # Modell-Historie — Rue & Salvesen Bundesliga-Wettmodell (v2)
 
-**Stand: 2026-05-23.** Dieses Dokument fasst chronologisch alle Schritte
+**Stand: 2026-08-11.** Dieses Dokument fasst chronologisch alle Schritte
 zusammen — vom ursprünglichen, *geleakten* Ergebnis bis zum aktuellen,
 leckfreien Walk-Forward gegen die Buchmacher-Schlusslinie. Ziel: jederzeit
 einen präzisen Überblick, *warum* die Pipeline so aussieht, wie sie aussieht.
@@ -216,3 +216,117 @@ Replay-Simulationen integriert.
 Für die Ablation wird der Multi-Season-Lauf einmal mit aktivem und einmal mit
 deaktiviertem Flag auf identischen MatchIDs ausgeführt. Erst die gepaarte
 Out-of-sample-RPS-Differenz beantwortet, ob der Zusatzparameter nützt.
+
+### Ablation: globaler gegen teamspezifischen Heimvorteil
+
+Verglichen wurden die beiden vollständigen Multi-Season-Runs vom 11.08.2026
+auf exakt denselben 925 Holdout-Spielen aus zehn Saisons (2016/17–2025/26):
+
+| Variante | mittlerer RPS |
+|----------|--------------:|
+| nur ligaweiter Heimvorteil | 0.203670 |
+| zusätzlich teamspezifische Abweichung | 0.203653 |
+
+Die Verbesserung von `0.0000167` ist praktisch null. Das saisongeblockte
+Bootstrap-95%-Intervall `[-0.000841, +0.000871]` umfasst null deutlich;
+Wilcoxon `p=0.772`. Die Teamvariante war in sechs von zehn Saisons besser,
+aber die Effekte wechselten das Vorzeichen. Gleichzeitig stieg das mittlere
+R-hat von ungefähr 1.339 auf 1.373. Ergebnis: Der innerhalb einer Saison neu
+geschätzte Team-Heimvorteil verbessert die Out-of-sample-Prognose nicht
+nachweisbar und erhöht Modellkomplexität sowie Rechenaufwand.
+
+---
+
+## 9. Saisonübergreifender Heimvorteil-Prior (2026-08-11)
+
+### Motivation
+
+Beim ersten Holdout-Refit liegen pro Team nur ungefähr zwölf Heimspiele der
+laufenden Saison vor. Deshalb wurde geprüft, ob abgeschlossene Vorsaisons einen
+stabileren Startwert für `h_i` liefern. Die Vorsaisonwerte werden **nicht** als
+zusätzliche Beobachtungen in jeden Walk-Forward-Refit kopiert. Stattdessen wird
+je abgeschlossener Saison einmal ein eigener Heimparameter gefittet und dessen
+Posterior-Mittelwert als informativer Prior der Zielsaison verwendet:
+
+```
+h_i,target ~ N(mu_i,history, TEAM_HOME_ADV_PRIOR_SD²)
+```
+
+### Implementierung
+
+- `historical_home.py` fittet jede abgeschlossene historische Saison separat
+  und cached das Resultat unter `cache_v2/historical_home/`.
+- Standardmäßig werden die letzten drei Saisons verwendet. Die Gewichte sind,
+  von alt nach neu, `0.65²`, `0.65` und `1.0` und werden normalisiert.
+- Fehlende Team-Saisons tragen null bei. Aufsteiger ohne Bundesliga-Historie
+  starten bei null, also beim ligaweiten Durchschnitt.
+- Die historischen Prior-Mittel werden über die bekannten Teams zentriert,
+  damit `sum(h)=0` mit der Identifikation des Samplers kompatibel bleibt.
+- Innerhalb der laufenden Saison wird der Prior bei jedem Walk-Forward-Refit
+  durch alle bis dahin bekannten Spiele aktualisiert. Zwischen Spieltagen
+  bleibt der vorhandene Warm-Start erhalten.
+- Es fließen ausschließlich Saisons `< target_season` ein. Damit entsteht kein
+  Look-ahead-Leak.
+- `run.py`, `backtest.py`, `backtest_multiseason.py` und `predict_final.py`
+  kennen die neue Konfiguration. MCMC-Caches mit historischem Prior tragen
+  einen eigenen Suffix, damit sie nicht mit alten Fits verwechselt werden.
+- Der Numba-Zufallszustand wird nun zusätzlich explizit gesetzt. Zuvor setzte
+  `np.random.seed` nur NumPys Python-Zustand, nicht zuverlässig den separaten
+  RNG des JIT-Kerns. Gleiche Seeds erzeugen jetzt reproduzierbare MCMC-Läufe.
+
+| Flag | Bedeutung | Standard |
+|------|-----------|---------:|
+| `USE_HISTORICAL_HOME_PRIOR` | Vorsaison-Prior aktivieren | `True` |
+| `HOME_ADV_HISTORY_SEASONS` | Zahl abgeschlossener Vorsaisons | `3` |
+| `HOME_ADV_HISTORY_DECAY` | Gewicht je zusätzlicher Saison Abstand | `0.65` |
+| `HOME_ADV_HISTORY_ITER` | MCMC-Budget je historischem Saison-Fit | `8000` |
+| `HOME_ADV_HISTORY_BURNIN` | Burn-in des historischen Fits | `2000` |
+| `HOME_ADV_HISTORY_THIN` | Thinning des historischen Fits | `10` |
+
+### Tests
+
+Die Implementierung ist durch Unit-Tests für folgende Eigenschaften
+abgesichert: korrekte Zuordnung nach Teamname, Zentrierung, Aufsteiger bei
+null, exponentielle Saisongewichtung, Sum-to-zero im Sampler, Feature-Toggle
+und reproduzierbare Seeds. Stand 11.08.2026 sind **10/10 Tests grün**.
+
+Zusätzlich wurden zwei zeitlich ehrliche Ablationen gerechnet:
+
+1. **Smoke-Test 2024/25:** 35 Holdout-Spiele, eine Kette, 3000/1500
+   Iterationen. Current-only RPS `0.174565`, historischer Prior `0.178540`;
+   der historische Prior war um `0.003975` schlechter. Dieser Lauf war nur ein
+   Funktions- und Richtungstest.
+2. **Mittlerer Test 2022/23–2024/25:** 277 gepaarte Holdout-Spiele, voller
+   30%-Holdout, zwei Ketten, 6000 Iterationen beim ersten und 3000 bei warmen
+   Refits, echter Understat-xG, kontinuierliches Gamma-Modell und Marktwert-
+   Prior. Das Konfidenzintervall wurde per Bootstrap ganzer Matchdays berechnet.
+
+| Saison | n | Current-only RPS | Historischer RPS | Current − Historisch |
+|--------|--:|-----------------:|-----------------:|---------------------:|
+| 2022/23 | 93 | 0.202554 | 0.203914 | -0.001360 |
+| 2023/24 | 92 | 0.180827 | 0.182652 | -0.001826 |
+| 2024/25 | 92 | 0.220265 | 0.220916 | -0.000651 |
+| **gesamt** | **277** | **0.201220** | **0.202499** | **-0.001279** |
+
+Ein positiver Wert der letzten Spalte würde für den historischen Prior
+sprechen. Stattdessen war er in allen drei Saisons schlechter. Das gepoolte
+Matchday-Block-Bootstrap-95%-Intervall lautet `[-0.003608, +0.001149]`, der
+Wilcoxon-Test `p=0.374`; die Verschlechterung ist daher nicht signifikant.
+Die mittlere absolute Wahrscheinlichkeitsänderung betrug 1.44 Prozentpunkte.
+
+### Einordnung und Entscheidung
+
+Der mittlere Test besitzt wesentlich mehr Spiele als der Smoke-Test, aber sein
+reduziertes MCMC-Budget konvergierte nicht formal: maximales R-hat je Variante
+und Saison lag zwischen 3.14 und 5.43. Das statistische Intervall erfasst die
+Spielstichprobe, nicht diesen zusätzlichen Monte-Carlo-Fehler. Die Richtung
+ist dennoch konsistent: keine der drei Saisons profitierte vom historischen
+Prior. Zusammen mit der vollständigen 10-Saison-Ablation des teamspezifischen
+Parameters gibt es derzeit **keine Evidenz, die zusätzliche Komplexität im
+finalen Prognosemodell zu verwenden**. Die Funktion bleibt für Reproduktion
+und weitere Forschung schaltbar erhalten; bevorzugte Referenz bleibt der
+ligaweite Heimvorteil.
+
+Reproduzierbare Artefakte des mittleren Tests liegen unter
+`output/medium_historical_home_20260811_124604/`; das Testskript ist
+`medium_test_historical_home.py`.
