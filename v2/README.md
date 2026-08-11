@@ -53,6 +53,14 @@ python quick_test_historical_home.py
 python medium_test_historical_home.py
 ```
 
+## Betting-Strategien
+
+`analyze_betting_strategies.py` untersucht das beste v2-Modell ohne
+teamspezifischen Heimvorteil mit echten Closing-, Opening- und gemittelten
+Quoten. Die Strategiesuche und der zeitlich spätere Test sind getrennt; ROI
+wird mit rohen Dezimalquoten inklusive Marge berechnet. Methodik, Resultate
+und Grenzen stehen kompakt in [`BETTING_STRATEGIEN.md`](BETTING_STRATEGIEN.md).
+
 ## Konfiguration
 
 In `run.py` ganz oben:

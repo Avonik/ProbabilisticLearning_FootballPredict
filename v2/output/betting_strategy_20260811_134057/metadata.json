@@ -1,0 +1,27 @@
+{
+  "model": "best_v2_no_teamhome",
+  "predictions": "output\\multiseason_20260811_115310\\multiseason_per_match_rps.csv",
+  "development_seasons": [
+    "2016/17",
+    "2017/18",
+    "2018/19",
+    "2019/20",
+    "2020/21",
+    "2021/22"
+  ],
+  "locked_test_seasons": [
+    "2022/23",
+    "2023/24",
+    "2024/25",
+    "2025/26"
+  ],
+  "coverage": {
+    "closing": 925,
+    "opening": 925,
+    "opening_mean": 925,
+    "open_close_mid": 925
+  },
+  "roi": "flat one-unit stakes at raw decimal odds",
+  "market_probability": "normalized inverse odds",
+  "midpoint_warning": "open_close_mid is a sensitivity price, not an observed executable quote"
+}
